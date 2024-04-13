@@ -6,3 +6,4 @@ logs/
 **/*.txt
 **/*.pkl
 search/log/
+*.log
