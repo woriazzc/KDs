@@ -1,0 +1,20 @@
+Chronologically-ordered Amazon Books dataset.
+
+Config:
+-------
+filename: Amazon_Books
+dataset: AmazonBooks
+kcore4user: 10
+kcore4item: 10
+star4pos: 4
+ratios: (8, 1, 1)
+
+Statistics:
+-----------
++--------+-------+---------------+---------+--------+--------+------------------------+
+| #User  | #Item | #Interactions |  #Train | #Valid | #Test  |        Density         |
++--------+-------+---------------+---------+--------+--------+------------------------+
+| 109730 | 96421 |    3181759    | 2502323 | 308885 | 370551 | 0.00030072551044609626 |
++--------+-------+---------------+---------+--------+--------+------------------------+
+
+URL = "https://zenodo.org/record/7683693/files/AmazonBooks_10104811_Chron.zip"

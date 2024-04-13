@@ -1,0 +1,4 @@
+htd_alpha: 0.5
+htd_num_experts: 30
+htd_choice: second
+htd_T: 0.1

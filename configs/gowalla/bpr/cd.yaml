@@ -1,0 +1,6 @@
+cd_sample_num: 3000
+cd_strategy: "student guide"  # "random", "student guide", "teacher guide"
+cd_T: 20
+cd_n_distill: 50
+cd_t1: 2
+cd_t2: 0

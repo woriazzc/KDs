@@ -1,0 +1,8 @@
+__pycache__/
+.vscode/
+
+checkpoints/
+logs/
+**/*.txt
+**/*.pkl
+search/log/
