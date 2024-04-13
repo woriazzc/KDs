@@ -19,9 +19,15 @@ def handler(signum, frame):
 
 
 def gpu_info(gpu_index):
-    info = os.popen('nvidia-smi|grep %').read().split('\n')[gpu_index]
-    rate = int(info.split('|')[3].strip().split('%')[0])
-    memory = int(info.split('|')[2].split()[0].split('M')[0])
+    ## through nvidia-smi
+    # info = os.popen('nvidia-smi|grep %').read().split('\n')[gpu_index]
+    # rate = int(info.split('|')[3].strip().split('%')[0])
+    # memory = int(info.split('|')[2].split()[0].split('M')[0])
+
+    # through gpustat
+    info = os.popen('gpustat|grep %').read().split('\n')[gpu_index]
+    rate = int(info.split('|')[1].strip().split(',')[1].split('%')[0].strip())
+    memory = int(info.split('|')[2].strip().split('/')[0].strip())
     return rate, memory
 
 
