@@ -43,26 +43,37 @@ parser.add_argument(
         '--cfg',
         nargs='+',
         action=DictAction,
-        help='override some settings in the used config file')
+        help='override some settings in the model config')
+parser.add_argument(
+        '--teacher',
+        nargs='+',
+        action=DictAction,
+        help='override some settings in the teacher config')
+parser.add_argument(
+        '--student',
+        nargs='+',
+        action=DictAction,
+        help='override some settings in the student config')
 
 args = parser.parse_args()
-
-"""
-Merge yaml and cmd
-    priority: cmd > yaml > parser.default
-"""
-# Read from configs/<dataset>/<model>.yaml
 if args.train_teacher:
     args.model = "scratch"
-config_path = os.path.join(CONFIG_DIR, args.dataset.lower(), args.backbone.lower(), f"{args.model.lower()}.yaml")
-args = parse_cfg(args, config_path, args.cfg)
 args.__dict__.update({"LOG_DIR": LOG_DIR, "CONFIG_DIR": CONFIG_DIR, "DATA_DIR": DATA_DIR})
 
 """
 create args for backbone
 """
-backbone_config = load_yaml(os.path.join(CONFIG_DIR, args.dataset.lower(), args.backbone.lower(), f"base_config.yaml"))
 teacher_args = argparse.Namespace()
-teacher_args.__dict__.update(backbone_config["teacher"])
 student_args = argparse.Namespace()
-student_args.__dict__.update(backbone_config["student"])
+"""
+Merge yaml and cmd
+    priority: cmd > yaml > parser.default
+"""
+model_config = load_yaml(os.path.join(CONFIG_DIR, args.dataset.lower(), args.backbone.lower(), f"{args.model.lower()}.yaml"))
+backbone_config = load_yaml(os.path.join(CONFIG_DIR, args.dataset.lower(), args.backbone.lower(), f"base_config.yaml"))
+args = parse_cfg(args, model_config, args.cfg)
+teacher_args = parse_cfg(teacher_args, backbone_config["teacher"], args.teacher)
+student_args = parse_cfg(student_args, backbone_config["student"], args.student)
+args.__dict__.pop("cfg", None)
+args.__dict__.pop("teacher", None)
+args.__dict__.pop("student", None)

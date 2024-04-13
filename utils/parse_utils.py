@@ -118,18 +118,17 @@ class DictAction(Action):
         setattr(namespace, self.dest, options)
 
 
-def parse_cfg(args, yaml_file, update_dict={}):
-    """load configurations from a yaml file & update from command-line argments
+def parse_cfg(args, config, update_dict={}):
+    """load configurations from yaml files & update from command-line argments
     Input:
-        yaml_file: str, path to a yaml configuration file
+        args: argparse.Namespace, model args
+        config: dict, loaded from yaml configuration file
         update_dict: dict, to modify/update options in those yaml configurations
     Output:
         args
     """
-    config_dict = yaml.load(open(yaml_file, 'r'), Loader=yaml.FullLoader)
-    if config_dict is not None:
-        args.__dict__.update(config_dict)
+    if config is not None:
+        args.__dict__.update(config)
     if update_dict is not None:
         args.__dict__.update(update_dict)
-    args.__dict__.pop("cfg", None)
     return args
