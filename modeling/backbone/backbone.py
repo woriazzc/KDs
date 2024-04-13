@@ -2,13 +2,17 @@ import os
 import math
 import pickle
 import random
+import yaml
 import numpy as np
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import scipy.sparse as sp
+from scipy.sparse import csr_matrix
 
 from .base_model import BaseRec, BaseGCN
+from .utils import convert_sp_mat_to_sp_tensor
 
 
 class BPR(BaseRec):
@@ -127,19 +131,66 @@ class LightGCN(BaseGCN):
         self.user_emb = torch.nn.Embedding(num_embeddings=self.num_users, embedding_dim=self.embedding_dim)
         self.item_emb = torch.nn.Embedding(num_embeddings=self.num_items, embedding_dim=self.embedding_dim)
         
-        self.Graph = self.dataset.SparseGraph
-
-        self.aug_graph = getattr(args, "aug_graph", False)
-        if self.aug_graph:
-            self.augGraph = pickle.load(open(os.path.join("data", args.dataset, "aug_graph.pkl"), "rb")).cuda()
-        else:
-            self.augGraph = None
+        self.Graph = self.construct_graph()
 
         self.reset_para()
     
     def reset_para(self):
         nn.init.normal_(self.user_emb.weight, std=self.init_std)
         nn.init.normal_(self.item_emb.weight, std=self.init_std)
+
+    def _construct_small_graph(self):
+        user_dim = torch.LongTensor(self.dataset.train_pairs[:, 0].cpu())
+        item_dim = torch.LongTensor(self.dataset.train_pairs[:, 1].cpu())
+
+        first_sub = torch.stack([user_dim, item_dim + self.num_users])
+        second_sub = torch.stack([item_dim + self.num_users, user_dim])
+        index = torch.cat([first_sub, second_sub], dim=1)
+        data = torch.ones(index.size(-1)).int()
+        Graph = torch.sparse_coo_tensor(index, data,
+                                            torch.Size([self.num_users + self.num_items, self.num_users + self.num_items]), dtype=torch.int)
+        dense = Graph.to_dense()
+        D = torch.sum(dense, dim=1).float()
+        D[D == 0.] = 1.
+        D_sqrt = torch.sqrt(D).unsqueeze(dim=0)
+        dense = dense / D_sqrt
+        dense = dense / D_sqrt.t()
+        index = dense.nonzero(as_tuple=False)
+        data = dense[dense >= 1e-9]
+        assert len(index) == len(data)
+        Graph = torch.sparse_coo_tensor(index.t(), data, torch.Size(
+            [self.num_users + self.num_items, self.num_users + self.num_items]), dtype=torch.float)
+        Graph = Graph.coalesce()
+        return Graph
+    
+    def _construct_large_graph(self):
+        adj_mat = sp.dok_matrix((self.num_users + self.num_items, self.num_users + self.num_items), dtype=np.float32)
+        adj_mat = adj_mat.tolil()
+        train_pairs = self.dataset.train_pairs.numpy()
+        UserItemNet  = csr_matrix((np.ones(len(train_pairs)), (train_pairs[:, 0], train_pairs[:, 1])), shape=(self.num_users, self.num_items))
+        R = UserItemNet.tolil()
+        adj_mat[:self.num_users, self.num_users:] = R
+        adj_mat[self.num_users:, :self.num_users] = R.T
+        adj_mat = adj_mat.todok()
+        rowsum = np.array(adj_mat.sum(axis=1))
+        d_inv = np.power(rowsum, -0.5).flatten()
+        d_inv[np.isinf(d_inv)] = 0.
+        d_mat = sp.diags(d_inv)
+        
+        norm_adj = d_mat.dot(adj_mat)
+        norm_adj = norm_adj.dot(d_mat)
+        norm_adj = norm_adj.tocsr()
+        Graph = convert_sp_mat_to_sp_tensor(norm_adj)
+        Graph = Graph.coalesce()
+        return Graph
+
+    def construct_graph(self):
+        config = yaml.load(open(os.path.join(self.args.DATA_DIR, self.args.dataset, 'config.yaml'), 'r'), Loader=yaml.FullLoader)
+        if "large" in config and config["large"] == True:
+            Graph = self._construct_large_graph()
+        else:
+            Graph = self._construct_small_graph()
+        return Graph.cuda()
 
     def _dropout_x(self, x, keep_prob):
         size = x.size()
@@ -165,21 +216,17 @@ class LightGCN(BaseGCN):
         """
         propagate methods for lightGCN
         """
-        if self.training and self.aug_graph:
-            Graph = self.augGraph
-        else:
-            Graph = self.Graph
         users_emb = self.user_emb.weight
         items_emb = self.item_emb.weight
         all_emb = torch.cat([users_emb, items_emb])
         light_out = all_emb
         if self.dropout:
             if self.training:
-                g_droped = self._dropout(self.keep_prob, Graph)
+                g_droped = self._dropout(self.keep_prob, self.Graph)
             else:
-                g_droped = Graph
+                g_droped = self.Graph
         else:
-            g_droped = Graph
+            g_droped = self.Graph
 
         for layer in range(1, self.num_layers + 1):
             if self.A_split:

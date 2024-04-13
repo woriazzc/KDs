@@ -24,8 +24,11 @@ def main(args):
     # Backbone
     all_backbones = [e.lower() for e in dir(backbone)]
     if args.backbone.lower() in all_backbones:
-        Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(trainset, teacher_args).cuda()
-        Student = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(trainset, student_args).cuda()
+        all_teacher_args, all_student_args = deepcopy(args), deepcopy(args)
+        all_teacher_args.__dict__.update(teacher_args.__dict__)
+        all_student_args.__dict__.update(student_args.__dict__)
+        Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(trainset, all_teacher_args).cuda()
+        Student = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(trainset, all_student_args).cuda()
     else:
         logger.log('Invalid backbone model.')
         raise(NotImplementedError, 'Invalid backbone model.')
