@@ -52,6 +52,15 @@ def main(args):
     evaluator = Evaluator(args)
     best_model, save_path = deepcopy(model.save())
 
+    # Test Teacher first
+    if not args.train_teacher:
+        logger.log('-' * 40 + "Teacher" + '-' * 40, pre=False)
+        tmp_evaluator = Evaluator(args)
+        tmp_model = KD.Scratch(args, Teacher).cuda()
+        is_improved, early_stop, eval_results, elapsed = tmp_evaluator.evaluate_while_training(tmp_model, -1, train_loader, testset)
+        Evaluator.print_final_result(logger, tmp_evaluator.eval_dict)
+        logger.log('-' * 88, pre=False)
+
     for epoch in range(args.epochs):
         logger.log(f'Epoch [{epoch + 1}/{args.epochs}]')
         tic1 = time.time()

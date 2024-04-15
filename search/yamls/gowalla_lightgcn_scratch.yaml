@@ -1,9 +1,13 @@
 exp_name: gowalla_lightgcn_scratch
 command:
-    python -u main.py --dataset=gowalla --backbone=lightgcn --train_teacher --no_log --teacher embedding_dim={embedding_dim}
+    python -u main.py --dataset=gowalla --backbone=lightgcn --train_teacher --no_log --teacher embedding_dim={embedding_dim} num_layers={num_layers} --cfg wd={wd}
 params:
   - name: embedding_dim
-    values: [20, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    values: [20, 200, 400, 600, 800, 1000]
+  - name: num_layers
+    values: [1, 3, 5]
+  - name: wd
+    values: [1e-4, 1e-6, 1e-8]
 gpus: [1]        # available gpus
 sampling: grid      # grid / random
 max_trials: 600     # only used when sampling='random'

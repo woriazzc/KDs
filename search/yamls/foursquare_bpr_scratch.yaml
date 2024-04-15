@@ -1,9 +1,11 @@
 exp_name: foursquare_bpr_scratch
 command:
-    python -u main.py --dataset=foursquare --backbone=bpr --train_teacher --no_log --teacher embedding_dim={embedding_dim}
+    python -u main.py --dataset=foursquare --backbone=bpr --train_teacher --no_log --teacher embedding_dim={embedding_dim} --cfg wd={wd}
 params:
   - name: embedding_dim
-    values: [20, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    values: [20, 800, 1000]
+  - name: wd
+    values: [1e-3, 1e-4, 1e-6]
 gpus: [2]        # available gpus
 sampling: grid      # grid / random
 max_trials: 600     # only used when sampling='random'

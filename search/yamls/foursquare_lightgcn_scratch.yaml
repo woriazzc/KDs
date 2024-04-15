@@ -1,9 +1,13 @@
 exp_name: foursquare_lightgcn_scratch
 command:
-    python -u main.py --dataset=foursquare --backbone=lightgcn --train_teacher --no_log --teacher embedding_dim={embedding_dim}
+    python -u main.py --dataset=foursquare --backbone=lightgcn --train_teacher --no_log --teacher embedding_dim={embedding_dim} num_layers={num_layers} --cfg wd={wd}
 params:
   - name: embedding_dim
-    values: [20, 100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    values: [1500, 2000, 3000]
+  - name: num_layers
+    values: [1]
+  - name: wd
+    values: [1e-1, 1e-2, 1e-3]
 gpus: [3]        # available gpus
 sampling: grid      # grid / random
 max_trials: 600     # only used when sampling='random'
