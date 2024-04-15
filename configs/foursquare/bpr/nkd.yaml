@@ -1,3 +1,8 @@
+epochs: 1000
+batch_size: 2048
+lr: 1.e-3
+wd: 1.e-4
+
 nkd_num_experts: 5
 nkd_strategy: hard  # hard, soft
 nkd_alpha: 0.7
