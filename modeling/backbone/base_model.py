@@ -39,6 +39,9 @@ class BaseRec(nn.Module):
     def get_ratings(self, batch_user):
         raise NotImplementedError
     
+    def get_all_embedding(self):
+        raise NotImplementedError
+    
     def get_loss(self, output):
         """Compute the loss function with the model output
 
@@ -120,6 +123,9 @@ class BaseGCN(BaseRec):
         """
         all_users, all_items = self.computer()
         return all_users, all_items
+
+    def get_all_embedding(self):
+        return self.get_all_post_embedding()
     
     def forward_multi_items(self, batch_user, batch_items):
         """forward when we have multiple items for a user

@@ -49,8 +49,7 @@ class CPD(BaseKD):
         return F.cross_entropy(S / self.tau_ce, T_probs, reduction='sum')
 
     def get_params_to_update(self):
-        return [{"params": self.student.parameters(), 'lr': self.args.lr, 'weight_decay': self.args.wd},
-                {"params": self.parameters(), "lr": self.args.lr, 'weight_decay': self.args.wd}]
+        return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
 
     def do_something_in_each_epoch(self, epoch):
         with torch.no_grad():
@@ -157,8 +156,7 @@ class NKD(BaseKD):
         self.nearestK_i = self.get_nearest_K(all_i, self.K)
     
     def get_params_to_update(self):
-        return [{"params": self.student.parameters(), 'lr': self.args.lr, 'weight_decay': self.args.wd},
-                {"params": self.parameters(), "lr": self.args.lr, 'weight_decay': self.args.wd}]
+        return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
 
     def get_nearest_K(self, embs, K):
         with torch.no_grad():
@@ -181,7 +179,7 @@ class NKD(BaseKD):
             S = self.student.get_item_embedding(batch_entity)
             experts = self.S_item_experts
         
-        rnd_choice = torch.randint(0, self.K if is_user else self.L, (N, ), device='cuda')
+        rnd_choice = torch.randint(0, self.K, (N, ), device='cuda')
         if is_user:
             neighborsS = self.student.get_user_embedding(self.nearestK_u[batch_entity, rnd_choice])     # bs, S_dim
             neighborsT = self.teacher.get_user_embedding(self.nearestK_u[batch_entity, rnd_choice])     # bs, T_dim
@@ -195,7 +193,7 @@ class NKD(BaseKD):
 
             S = rndS * neighborsS + (1. - rndS) * S     # bs, S_dim
             T = rndT * neighborsT + (1. - rndT) * T     # bs, T_dim
-        elif self.aug == 'hard':
+        elif self.strategy == 'hard':
             rndS = torch.rand_like(S, device='cuda')
             rndT = torch.rand_like(T, device='cuda')
             

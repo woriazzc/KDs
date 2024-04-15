@@ -92,7 +92,7 @@ class BPR(BaseRec):
     def get_item_embedding(self, batch_item):
         return self.item_emb(batch_item)
 
-    def get_all_pre_embedding(self):
+    def get_all_embedding(self):
         """get total embedding of users and items
 
         Returns
@@ -106,12 +106,12 @@ class BPR(BaseRec):
         return users, items
     
     def get_all_ratings(self):
-        users, items = self.get_all_pre_embedding()
+        users, items = self.get_all_embedding()
         score_mat = torch.matmul(users, items.T)
         return score_mat
     
     def get_ratings(self, batch_user):
-        users, items = self.get_all_pre_embedding()
+        users, items = self.get_all_embedding()
         users = users[batch_user]
         score_mat = torch.matmul(users, items.T)
         return score_mat

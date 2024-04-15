@@ -6,18 +6,23 @@ import torch.nn.functional as F
 
 
 class BaseKD(nn.Module):
-    def __init__(self, args, teacher, student):
+    def __init__(self, args, teacher, student, frozen_teacher=True):
         super().__init__()
         
         self.args = args
         self.training = True
         self.teacher = teacher
         self.student = student
+        self.frozen_teacher = frozen_teacher
         self.teacher.eval()
         self.dataset = self.teacher.dataset
         self.num_users = self.dataset.num_users
         self.num_items = self.dataset.num_items
         self.lmbda = args.lmbda
+
+        if self.frozen_teacher:
+            for param in self.teacher.parameters():
+                param.requires_grad=False
 
     def get_loss(self):
         raise NotImplementedError
