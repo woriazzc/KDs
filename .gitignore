@@ -5,6 +5,7 @@ checkpoints/
 logs/
 **/*.txt
 **/*.pkl
+**/*.dat
 search/log/
 *.log
 search/yamls/
