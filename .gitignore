@@ -7,3 +7,4 @@ logs/
 **/*.pkl
 search/log/
 *.log
+search/yamls/
