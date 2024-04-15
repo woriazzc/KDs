@@ -2,6 +2,7 @@ import os
 import math
 import numpy as np
 
+from torch_cluster import knn
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -161,11 +162,7 @@ class NKD(BaseKD):
     def get_nearest_K(self, embs, K):
         with torch.no_grad():
             embs = pca(embs, 150)
-            embs = embs.cpu()
-            distances = torch.cdist(embs, embs)
-            _, topk_indices = torch.topk(distances, k=K+1, largest=False, dim=-1)
-            del distances
-            torch.cuda.empty_cache()
+            topk_indices = knn(embs, embs, k=K+1).reshape(-1, K + 1)
         return topk_indices[:, 1:].cuda()
 
     def get_features(self, batch_entity, is_user):
