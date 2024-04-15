@@ -1,0 +1,7 @@
+cpd_num_experts: 5
+cpd_alpha: 0.1
+cpd_beta: 1.
+cpd_K: 20
+cpd_T: 10
+cpd_mxK: 500
+cpd_tau_ce: 5.

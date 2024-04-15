@@ -1,0 +1,4 @@
+nkd_num_experts: 5
+nkd_strategy: hard  # hard, soft
+nkd_alpha: 0.7
+nkd_K: 5
