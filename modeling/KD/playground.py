@@ -162,7 +162,7 @@ class NKD(BaseKD):
     def get_nearest_K(self, embs, K):
         with torch.no_grad():
             embs = pca(embs, 150)
-            topk_indices = knn(embs, embs, k=K+1).reshape(-1, K + 1)
+            topk_indices = knn(embs, embs, k=K+1)[1].reshape(-1, K + 1)
         return topk_indices[:, 1:].cuda()
 
     def get_features(self, batch_entity, is_user):
