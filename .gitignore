@@ -9,3 +9,4 @@ logs/
 search/log/
 *.log
 search/yamls/
+analysis.ipynb
