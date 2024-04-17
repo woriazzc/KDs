@@ -152,7 +152,7 @@ class Evaluator:
             logger.log()
 
     @classmethod
-    def print_final_result(self, logger, eval_dict):
+    def print_final_result(self, logger, eval_dict, prefix=""):
         """print final result after the training
 
         Parameters
@@ -167,7 +167,7 @@ class Evaluator:
             else:
                 key = 'final_result'
 
-            logger.log(mode, end='')
+            logger.log(prefix + mode, end='')
             for metric in eval_dict[key].keys():
                 for K in eval_dict[key][metric].keys():
                     result = eval_dict[key][metric][K]

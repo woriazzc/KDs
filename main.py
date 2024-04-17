@@ -104,8 +104,9 @@ def main(args):
     
     eval_dict = evaluator.eval_dict
     Evaluator.print_final_result(logger, eval_dict)
-    os.makedirs(os.path.dirname(save_path), exist_ok=True)
-    torch.save(best_model, save_path)
+    if not args.no_save:
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        torch.save(best_model, save_path)
 
     return eval_dict
 
@@ -130,7 +131,7 @@ if __name__ == '__main__':
         avg_eval_dict = avg_dict(eval_dicts)
 
         logger.log('=' * 60)
-        Evaluator.print_final_result(logger, avg_eval_dict)
+        Evaluator.print_final_result(logger, avg_eval_dict, prefix="avg ")
     else:
         logger.log_args(teacher_args, "TEACHER")
         if not args.train_teacher:
