@@ -201,8 +201,8 @@ class NKD(BaseKD):
         elif self.strategy == 'randmix':
             rndS = random.random() * self.alpha * 2
             rndT = random.random() * self.alpha * 2
-            S = rndS * S + (1. - rnd) * neighborsS
-            T = rnd * T + (1. - rnd) * neighborsT
+            S = rndS * S + (1. - rndS) * neighborsS
+            T = rndT * T + (1. - rndT) * neighborsT
         elif self.strategy == 'hardmix':
             rndS = random.random()
             if rndS >= self.alpha:
