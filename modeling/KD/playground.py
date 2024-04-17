@@ -188,21 +188,20 @@ class NKD(BaseKD):
         if self.strategy == 'soft':
             rndS = torch.rand_like(S, device='cuda') * self.alpha * 2
             rndT = torch.rand_like(T, device='cuda') * self.alpha * 2
-
-            S = rndS * neighborsS + (1. - rndS) * S     # bs, S_dim
-            T = rndT * neighborsT + (1. - rndT) * T     # bs, T_dim
+            S = rndS * S + (1. - rndS) * neighborsS     # bs, S_dim
+            T = rndT * T + (1. - rndT) * neighborsT     # bs, T_dim
         elif self.strategy == 'hard':
             rndS = torch.rand_like(S, device='cuda')
             rndT = torch.rand_like(T, device='cuda')
-            
             S = torch.where(rndS < self.alpha, S, neighborsS)   # bs, S_dim
             T = torch.where(rndT < self.alpha, T, neighborsT)   # bs, T_dim
         elif self.strategy == 'mix':
             S = self.alpha * S + (1. - self.alpha) * neighborsS
             T = self.alpha * T + (1. - self.alpha) * neighborsT
         elif self.strategy == 'randmix':
-            rnd = random.random() * self.alpha * 2
-            S = rnd * S + (1. - rnd) * neighborsS
+            rndS = random.random() * self.alpha * 2
+            rndT = random.random() * self.alpha * 2
+            S = rndS * S + (1. - rnd) * neighborsS
             T = rnd * T + (1. - rnd) * neighborsT
         elif self.strategy == 'hardmix':
             rndS = random.random()
