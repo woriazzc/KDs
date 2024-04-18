@@ -4,11 +4,11 @@ teacher:
   A_split: False
   dropout: False
   embedding_dim: 2000
-  num_layers: 1
+  num_layers: 3
 student:
   init_std: 0.1
   keep_prob: 0.6
   A_split: False
   dropout: False
   embedding_dim: 20
-  num_layers: 1
+  num_layers: 3
