@@ -23,6 +23,7 @@ python -u main.py --dataset=foursquare --backbone=bpr --model=de
 python -u main.py --dataset=foursquare --backbone=bpr --model=cpd
 python -u main.py --dataset=foursquare --backbone=bpr --model=nkd
 python -u main.py --dataset=foursquare --backbone=bpr --model=graphd
+python -u main.py --dataset=foursquare --backbone=bpr --model=filterd
 
 python -u main.py --dataset=foursquare --backbone=lightgcn --model=nkd
 
