@@ -7,5 +7,6 @@ lmbda: 0.5
 filterd_num_experts: 5
 filterd_K: 5
 filterd_alpha: 0.7
+filterd_beta: 0.5
 filterd_smooth_ratio: 0.1
 filterd_rough_ratio: 0.01

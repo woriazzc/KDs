@@ -324,6 +324,7 @@ class FilterD(BaseKD):
 
         self.num_experts = args.filterd_num_experts
         self.alpha = args.filterd_alpha
+        self.beta = args.filterd_beta
         self.K = args.filterd_K
         self.smooth_ratio = args.filterd_smooth_ratio
         self.rough_ratio = args.filterd_rough_ratio
@@ -368,16 +369,20 @@ class FilterD(BaseKD):
         Graph = torch.sparse_coo_tensor(index.t(), data, torch.Size([N, N]), dtype=torch.float)
         Graph = Graph.coalesce()
         return Graph.cuda()
+    
+    def weight_feature(self, value):
+        return torch.exp(self.beta * value)
 
     def cal_filters(self, embs, K, smooth_ratio, rough_ratio):
         nearestK = self._get_nearest_K(embs, K)
         Adj = self._construct_knn_graph(nearestK)
         smooth_dim = int(Adj.shape[0] * smooth_ratio)
-        smooth_values, smooth_vectors = torch.lobpcg(Adj, k=smooth_dim, largest=True, niter=5)
+        # smooth_values, smooth_vectors = torch.lobpcg(Adj, k=smooth_dim, largest=True, niter=5)
+        smooth_vectors, smooth_values, _ = torch.svd_lowrank(Adj, q=smooth_dim, niter=30)
         rough_dim = int(Adj.shape[0] * rough_ratio)
         rough_values, rough_vectors = torch.lobpcg(Adj, k=rough_dim, largest=False, niter=5)
-        smooth_filter = smooth_vectors.mm(smooth_vectors.t())
-        rough_filter = rough_vectors.mm(rough_vectors.t())
+        smooth_filter = (smooth_vectors * self.weight_feature(smooth_values)).mm(smooth_vectors.t())
+        rough_filter = (rough_vectors * self.weight_feature(rough_values)).mm(rough_vectors.t())
         return smooth_filter, rough_filter
     
     def computer(self, users_emb, items_emb, Graph_u, Graph_i):
