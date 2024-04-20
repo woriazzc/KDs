@@ -1,7 +1,30 @@
+import os
+import pickle
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from sklearn.decomposition import PCA
+
+
+def load_pkls(*fnames):
+    success_flg = True
+    pkls = []
+    for fname in fnames:
+        if os.path.exists(fname):
+            pkls.append(pickle.load(open(fname, "rb")))
+        else:
+            pkls.append(None)
+            success_flg = False
+    return success_flg, *pkls
+
+
+def dump_pkls(*pkl_fnames):
+    for t in pkl_fnames:
+        pkl, fname = t
+        if not os.path.exists(os.path.dirname(fname)):
+            os.makedirs(os.path.dirname(fname))
+        pickle.dump(pkl, open(fname, "wb"))
 
 
 def pca(X:torch.tensor, n_components:int) -> torch.tensor:
