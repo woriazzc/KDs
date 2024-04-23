@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .utils import Normalize, Expert, nosepExpert, pca
+from .utils import Normalize, Expert, nosepExpert, pca, load_pkls, dump_pkls
 from .base_model import BaseKD
 
 
@@ -273,8 +273,8 @@ class GraphD(BaseKD):
         data = torch.ones(index.size(-1)).cuda() * (1. - alpha) / K
         self_loop_idx = torch.stack([torch.arange(N), torch.arange(N)]).cuda()
         self_loop_data = torch.ones(self_loop_idx.size(-1)).cuda() * alpha
-        index = torch.cat([index, self_loop_idx], dim=1)
-        data = torch.cat([data, self_loop_data])
+        # index = torch.cat([index, self_loop_idx], dim=1)
+        # data = torch.cat([data, self_loop_data])
         Graph = torch.sparse_coo_tensor(index, data,
                                             torch.Size([N, N]), dtype=torch.float)
         Graph = Graph.coalesce()
@@ -401,8 +401,8 @@ class FilterD(BaseKD):
         S = experts(S)
         return T, S
     
-    def get_DE_loss(self, batch_entity, is_user, S_users_emb, S_items_emb):
-        T_feas, S_feas = self.get_features(batch_entity, is_user, S_users_emb, S_items_emb)
+    def get_DE_loss(self, batch_entity, is_user, S_emb, T_emb):
+        T_feas, S_feas = self.get_features(batch_entity, is_user, S_emb, T_emb)
 
         norm_T = T_feas.pow(2).sum(-1, keepdim=True).pow(1. / 2)
         T_feas = T_feas.div(norm_T)
@@ -414,6 +414,118 @@ class FilterD(BaseKD):
     def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
         S_users_emb_smooth, S_items_emb_smooth = self.computer(self.student.user_emb.weight, self.student.item_emb.weight, self.Graph_u_smooth, self.Graph_i_smooth)
         S_users_emb_rough, S_items_emb_rough = self.computer(self.student.user_emb.weight, self.student.item_emb.weight, self.Graph_u_rough, self.Graph_i_rough)
+
+        DE_loss_user = self.get_DE_loss(batch_user.unique(), True, S_users_emb_smooth, self.T_users_emb_smooth)
+        DE_loss_pos = self.get_DE_loss(batch_pos_item.unique(), False, S_items_emb_smooth, self.T_items_emb_smooth)
+        DE_loss_neg = self.get_DE_loss(batch_neg_item.unique(), False, S_items_emb_smooth, self.T_items_emb_smooth)
+        DE_loss_smooth = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
+
+        DE_loss_user = self.get_DE_loss(batch_user.unique(), True, S_users_emb_rough, self.T_users_emb_rough)
+        DE_loss_pos = self.get_DE_loss(batch_pos_item.unique(), False, S_items_emb_rough, self.T_items_emb_rough)
+        DE_loss_neg = self.get_DE_loss(batch_neg_item.unique(), False, S_items_emb_rough, self.T_items_emb_rough)
+        DE_loss_rough = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
+
+        DE_loss = self.alpha * DE_loss_smooth + (1. - self.alpha) * DE_loss_rough
+        return DE_loss
+
+
+class FD(BaseKD):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+
+        self.num_experts = args.fd_num_experts
+        self.alpha = args.fd_alpha
+        self.beta = args.fd_beta
+        self.K = args.fd_K
+        self.smooth_ratio = args.fd_smooth_ratio
+        self.rough_ratio = args.fd_rough_ratio
+        
+        self.student_dim = self.student.embedding_dim
+        self.teacher_dim = self.teacher.embedding_dim
+
+        self.S_user_experts = nosepExpert(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
+        self.S_item_experts = nosepExpert(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
+
+        self.Graph_smooth, self.Graph_rough = self.construct_graph(self.smooth_ratio, self.rough_ratio)
+        self.T_users_emb_smooth, self.T_items_emb_smooth = self.computer(self.teacher.user_emb.weight, self.teacher.item_emb.weight, self.Graph_smooth)
+        self.T_users_emb_rough, self.T_items_emb_rough = self.computer(self.teacher.user_emb.weight, self.teacher.item_emb.weight, self.Graph_rough)
+    
+    def get_params_to_update(self):
+        return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
+
+    def construct_graph(self, smooth_ratio, rough_ratio):
+        user_dim = torch.LongTensor(self.teacher.dataset.train_pairs[:, 0].cpu())
+        item_dim = torch.LongTensor(self.teacher.dataset.train_pairs[:, 1].cpu())
+
+        first_sub = torch.stack([user_dim, item_dim + self.num_users])
+        second_sub = torch.stack([item_dim + self.num_users, user_dim])
+        index = torch.cat([first_sub, second_sub], dim=1)
+        data = torch.ones(index.size(-1)).int()
+        Graph = torch.sparse_coo_tensor(index, data,
+                                            torch.Size([self.num_users + self.num_items, self.num_users + self.num_items]), dtype=torch.int)
+        dense = Graph.to_dense()
+        D = torch.sum(dense, dim=1).float()
+        D[D == 0.] = 1.
+        D_sqrt = torch.sqrt(D).unsqueeze(dim=0)
+        dense = dense / D_sqrt
+        dense = dense / D_sqrt.t()
+        index = dense.nonzero(as_tuple=False)
+        data = dense[dense >= 1e-9]
+        assert len(index) == len(data)
+        Graph = torch.sparse_coo_tensor(index.t(), data, torch.Size(
+            [self.num_users + self.num_items, self.num_users + self.num_items]), dtype=torch.float)
+        Graph = Graph.coalesce()
+
+        smooth_dim = int(Graph.shape[0] * smooth_ratio)
+        f_smooth_values = os.path.join("modeling", "KD", "crafts", "fd", f"smooth_values_{smooth_dim}.pkl")
+        f_smooth_vectors = os.path.join("modeling", "KD", "crafts", "fd", f"smooth_vectors_{smooth_dim}.pkl")
+        sucflg, smooth_values, smooth_vectors = load_pkls(f_smooth_values, f_smooth_vectors)
+        if not sucflg:
+            if smooth_ratio <= 0.3:
+                smooth_values, smooth_vectors = torch.lobpcg(Graph, k=smooth_dim, largest=True, niter=5)
+            else:
+                smooth_vectors, smooth_values, _ = torch.svd_lowrank(Graph, q=smooth_dim, niter=10)
+            dump_pkls((smooth_values, f_smooth_values), (smooth_vectors, f_smooth_vectors))
+        rough_dim = int(Graph.shape[0] * rough_ratio)
+        rough_values, rough_vectors = torch.lobpcg(Graph, k=rough_dim, largest=False, niter=5)
+        smooth_filter = (smooth_vectors * self.weight_feature(smooth_values)).mm(smooth_vectors.t())
+        rough_filter = (rough_vectors * self.weight_feature(rough_values)).mm(rough_vectors.t())
+        return smooth_filter.cuda(), rough_filter.cuda()
+    
+    def weight_feature(self, value):
+        return torch.exp(self.beta * value)
+        # return value
+    
+    def computer(self, users_emb, items_emb, Graph):
+        all_embs = torch.cat([users_emb, items_emb])
+        filtered_embs = torch.mm(Graph, all_embs)
+        filtered_users_emb, filtered_items_emb = torch.split(filtered_embs, [self.num_users, self.num_items])
+        return filtered_users_emb, filtered_items_emb
+
+    def get_features(self, batch_entity, is_user, S_emb, T_emb):
+        N = batch_entity.shape[0]
+        T = T_emb[batch_entity]
+        S = S_emb[batch_entity]
+        if is_user:
+            experts = self.S_user_experts
+        else:
+            experts = self.S_item_experts
+        S = experts(S)
+        return T, S
+    
+    def get_DE_loss(self, batch_entity, is_user, S_emb, T_emb):
+        T_feas, S_feas = self.get_features(batch_entity, is_user, S_emb, T_emb)
+
+        norm_T = T_feas.pow(2).sum(-1, keepdim=True).pow(1. / 2)
+        T_feas = T_feas.div(norm_T)
+        cos_theta = (T_feas * S_feas).sum(-1, keepdim=True)
+        G_diff = 1. - cos_theta
+        DE_loss = G_diff.sum()
+        return DE_loss
+
+    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+        S_users_emb_smooth, S_items_emb_smooth = self.computer(self.student.user_emb.weight, self.student.item_emb.weight, self.Graph_smooth)
+        S_users_emb_rough, S_items_emb_rough = self.computer(self.student.user_emb.weight, self.student.item_emb.weight, self.Graph_rough)
 
         DE_loss_user = self.get_DE_loss(batch_user.unique(), True, S_users_emb_smooth, self.T_users_emb_smooth)
         DE_loss_pos = self.get_DE_loss(batch_pos_item.unique(), False, S_items_emb_smooth, self.T_items_emb_smooth)
