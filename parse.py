@@ -27,6 +27,7 @@ parser.add_argument('--backbone', type=str, default='bpr')
 parser.add_argument('--model', type=str, default='rrd')
 
 parser.add_argument('--train_teacher', action='store_true')
+parser.add_argument('--ckpt_interval', type=int, default=-1, help="number of interval epochs to store teacher's checkpoints, -1 for only save the best_epoch")
 
 parser.add_argument('--epochs', type=int, default=1000)
 parser.add_argument('--lr', type=float, default=1e-3)
@@ -71,6 +72,9 @@ Merge yaml and cmd
     priority: cmd > yaml > parser.default
 """
 model_config = load_yaml(os.path.join(CONFIG_DIR, args.dataset.lower(), args.backbone.lower(), f"{args.model.lower()}.yaml"))
+if args.model == "scratch":
+    key = "teacher" if args.train_teacher else "student"
+    model_config = model_config[key]
 backbone_config = load_yaml(os.path.join(CONFIG_DIR, args.dataset.lower(), args.backbone.lower(), f"base_config.yaml"))
 args = parse_cfg(args, model_config, args.cfg)
 teacher_args = parse_cfg(teacher_args, backbone_config["teacher"], args.teacher)

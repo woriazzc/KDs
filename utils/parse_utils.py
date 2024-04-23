@@ -1,7 +1,6 @@
-from argparse import Action, ArgumentParser, Namespace
 import copy
-from typing import Any, Optional, Sequence, Tuple, Union
-import yaml
+from argparse import Action, ArgumentParser, Namespace
+from typing import Any, Sequence, Union
 
 class DictAction(Action):
     """From MMEngine
