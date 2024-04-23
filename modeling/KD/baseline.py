@@ -1,9 +1,12 @@
 import os
+import re
 import math
 import numpy as np
+from copy import deepcopy
 
 import torch
 import torch.nn as nn
+import torch.utils.data as data
 import torch.nn.functional as F
 
 from .utils import Expert
@@ -41,8 +44,9 @@ class Scratch(nn.Module):
         loss = base_loss
         return loss
 
-    def save(self):
-        return self.backbone.state_dict(), os.path.join("checkpoints", self.args.dataset, self.args.backbone, f"{self.backbone.embedding_dim}.pt")
+    @property
+    def param_to_save(self):
+        return self.backbone.state_dict()
 
 
 class RD(BaseKD):
@@ -752,3 +756,179 @@ class UnKD(BaseKD):
         mf_loss = torch.mean(torch.neg(mf_loss), dim=-1)
         mf_loss = torch.sum(mf_loss)
         return mf_loss
+
+
+class HetComp(BaseKD):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.num_ckpt = args.hetcomp_num_ckpt
+        self.K = args.hetcomp_K
+        self.p = args.hetcomp_p
+        self.alpha = args.hetcomp_alpha
+
+        self.perms, self.top_items, self.pos_items = self.construct_teacher_trajectory()
+        self.user_mask = self.student.dataset.train_mat.cuda()
+        self.v_result = 0
+        self.last_max_idx = np.zeros(self.num_users)
+        self.last_dist = None
+        self.is_first = True
+
+    def _cmp(self, f_name):
+        if "BEST_EPOCH" in f_name:
+            return math.inf
+        pt = re.compile(r".*EPOCH_([\d\.\-\+e]+)\.pt")
+        return eval(pt.search(f_name).group(1))
+    
+    @torch.no_grad()
+    def _get_permutations(self, model):
+        training = model.training
+        model.eval()
+        test_loader = data.DataLoader(model.user_list, batch_size=self.args.batch_size)
+        topK_items = torch.zeros((model.num_users, self.K), dtype=torch.long)
+        for batch_user in test_loader:
+            score_mat = model.get_ratings(batch_user)
+            for idx, user in enumerate(batch_user):
+                pos = model.dataset.train_dict[user.item()]
+                score_mat[idx, pos] = -1e10
+            _, sorted_mat = torch.topk(score_mat, k=self.K, dim=1)
+            topK_items[batch_user, :] = sorted_mat.detach().cpu()
+        model.train(training)
+        return topK_items
+
+    def construct_teacher_trajectory(self):
+        T_dir = os.path.join("checkpoints", self.args.dataset, self.args.backbone, f"scratch-{self.teacher.embedding_dim}")
+        assert os.path.exists(T_dir), f"Teacher path {T_dir} doesn't exists."
+        old_state = deepcopy(self.teacher.state_dict())
+        f_ckpts = []
+        for f in os.scandir(T_dir):
+            f_ckpts.append(f.path)
+        assert len(f_ckpts) >= self.num_ckpt, "Number of checkpoints must be no less than self.num_ckpt."
+        f_ckpts = sorted(f_ckpts, key=lambda x: self._cmp(x))
+        perms = []
+        for f_ckpt in f_ckpts:
+            self.teacher.load_state_dict(torch.load(f_ckpt))
+            perm = self._get_permutations(self.teacher)
+            perms.append(perm.cuda())
+        self.teacher.load_state_dict(old_state)
+
+        pos_dict = self.teacher.dataset.train_dict
+        pos_K = min([len(p_items) for p_items in pos_dict.values()])
+        pos_items = torch.zeros((self.num_users, pos_K), dtype=torch.long)
+        for u, p_items in pos_dict.items():
+            pos_items[u, :pos_K] = p_items[:pos_K]
+        top_items = perms[0]
+        return perms, top_items, pos_items.cuda()
+    
+    @torch.no_grad()
+    def _get_NDCG_u(self, sorted_list, teacher_t_items, k):
+        top_scores = np.asarray([np.exp(-t / 10) for t in range(k)])
+        top_scores = (2 ** top_scores) - 1
+        
+        t_items = teacher_t_items[:k].cpu()
+
+        denom = np.log2(np.arange(2, k + 2))
+        dcg = np.sum((np.in1d(sorted_list[:k], list(t_items)) * top_scores) / denom)
+        idcg = np.sum((top_scores / denom)[:k])
+        return round(dcg / idcg, 4)
+
+    def _DKC(self, sorted_mat, last_max_idx, last_dist, is_first, epoch):
+        next_idx = last_max_idx[:] 
+        if is_first:
+            last_dist = np.ones_like(next_idx)
+            for user in self.student.user_list:
+                next_v = min(self.num_ckpt - 1, int(next_idx[user]) + 1)
+
+                next_perm = self.perms[next_v][user]
+                next_dist = 1. - self._get_NDCG_u(sorted_mat[user], next_perm, self.K)
+                
+                last_dist[user] = next_dist
+
+            return next_idx, last_dist
+
+        th = self.alpha * (0.995 ** (epoch // self.p))
+
+        for user in self.student.user_list:
+            if int(last_max_idx[user]) == self.num_ckpt - 1:
+                continue
+
+            next_v = min(self.num_ckpt - 1, int(next_idx[user]) + 1)
+            next_next_v = min(self.num_ckpt - 1, int(next_idx[user]) + 2)
+            
+            next_perm = self.perms[next_v][user]
+            next_next_perm = self.perms[next_next_v][user]
+            
+            next_dist = 1. - self._get_NDCG_u(sorted_mat[user], next_perm, self.K)
+            
+            if (last_dist[user] / next_dist > th) or (last_dist[user] / next_dist < 1):
+                next_idx[user] += 1
+                next_next_dist = 1. - self._get_NDCG_u(sorted_mat[user], next_next_perm, self.K)
+                last_dist[user] = next_next_dist
+        return next_idx, last_dist
+    
+    def do_something_in_each_epoch(self, epoch):
+        ### DKC
+        if epoch % self.p == 0 and epoch >= self.p and self.v_result < self.num_ckpt - 1:
+            sorted_mat = self._get_permutations(self.student)
+            if self.is_first == True:
+                self.last_max_idx, self.last_dist = self._DKC(sorted_mat, self.last_max_idx, self.last_dist, True, epoch)
+                self.is_first = False
+            else:
+                self.last_max_idx, self.last_dist = self._DKC(sorted_mat, self.last_max_idx, self.last_dist, False, epoch)
+            for user in self.student.user_list:
+                self.top_items[user] = self.perms[int(self.last_max_idx[user])][user]
+            self.v_result = round(self.last_max_idx.mean(), 2)
+        
+    def overall_loss(self, batch_full_mat, pos_items, top_items, batch_user_mask):
+        tops = torch.gather(batch_full_mat, 1, torch.cat([pos_items, top_items], -1))
+        tops_els = (batch_full_mat.exp() * (1 - batch_user_mask)).sum(1, keepdims=True)
+        els = tops_els - torch.gather(batch_full_mat, 1, top_items).exp().sum(1, keepdims=True)
+        
+        above = tops.view(-1, 1)
+        below = torch.cat((pos_items.size(1) + top_items.size(1)) * [els], 1).view(-1, 1) + above.exp()
+        below = torch.clamp(below, 1e-5).log()
+
+        return -(above - below).sum()
+
+    def rank_loss(self, batch_full_mat, pos_items, top_items, batch_user_mask):
+        S_pos = torch.gather(batch_full_mat, 1, pos_items)
+        S_top = torch.gather(batch_full_mat, 1, top_items[:, :top_items.size(1) // 2])
+
+        below2 = (batch_full_mat.exp() * (1 - batch_user_mask)).sum(1, keepdims=True) - S_top.exp().sum(1, keepdims=True)
+        
+        above_pos = S_pos.sum(1, keepdims=True)
+        above_top = S_top.sum(1, keepdims=True)
+        
+        below_pos = S_pos.flip(-1).exp().cumsum(1)
+        below_top = S_top.flip(-1).exp().cumsum(1)
+        
+        below_pos = (torch.clamp(below_pos + below2, 1e-5)).log().sum(1, keepdims=True)        
+        below_top = (torch.clamp(below_top + below2, 1e-5)).log().sum(1, keepdims=True)  
+
+        pos_KD_loss = -(above_pos - below_pos).sum()
+
+        S_top_sub = torch.gather(batch_full_mat, 1, top_items[:, :top_items.size(1) // 10])
+        below2_sub = (batch_full_mat.exp() * (1-batch_user_mask)).sum(1, keepdims=True) - S_top_sub.exp().sum(1, keepdims=True)
+        
+        above_top_sub = S_top_sub.sum(1, keepdims=True)
+        below_top_sub = S_top_sub.flip(-1).exp().cumsum(1)
+        below_top_sub = (torch.clamp(below_top_sub + below2_sub, 1e-5)).log().sum(1, keepdims=True)  
+
+        top_KD_loss = - (above_top - below_top).sum() - (above_top_sub - below_top_sub).sum()
+
+        return  pos_KD_loss + top_KD_loss / 2
+
+    def get_loss(self, batch_users):
+        batch_full_mat = torch.clamp(self.student.get_ratings(batch_users), min=-40, max=40)
+        batch_user_mask = torch.index_select(self.user_mask, 0, batch_users).to_dense()
+        t_items = torch.index_select(self.top_items, 0, batch_users)
+        p_items = torch.index_select(self.pos_items, 0, batch_users)
+        if self.v_result < self.num_ckpt - 1:
+            KD_loss = self.overall_loss(batch_full_mat, p_items, t_items, batch_user_mask) * 2.
+        else:
+            KD_loss = self.rank_loss(batch_full_mat, p_items, t_items, batch_user_mask)
+        return KD_loss
+
+    def forward(self, batch_user, batch_pos_item, batch_neg_item):
+        kd_loss = self.get_loss(batch_user)
+        loss = self.lmbda * kd_loss
+        return loss
