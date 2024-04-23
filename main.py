@@ -33,10 +33,13 @@ def main(args):
         logger.log('Invalid backbone model.')
         raise(NotImplementedError, 'Invalid backbone model.')
 
-    if args.train_teacher:
-        model = KD.Scratch(args, Teacher).cuda()
+    if args.model.lower() == "scratch":
+        if args.train_teacher:
+            model = KD.Scratch(args, Teacher).cuda()
+        else:
+            model = KD.Scratch(args, Student).cuda()
     else:
-        T_path = os.path.join("checkpoints", args.dataset, args.backbone, f"{teacher_args.embedding_dim}.pt")
+        T_path = os.path.join("checkpoints", args.dataset, args.backbone, f"scratch-{teacher_args.embedding_dim}", "BEST_EPOCH.pt")
         Teacher.load_state_dict(torch.load(T_path))
         all_models = [e.lower() for e in dir(KD)]
         if args.model.lower() in all_models:
@@ -50,10 +53,11 @@ def main(args):
 
     # Evaluator
     evaluator = Evaluator(args)
-    best_model, save_path = deepcopy(model.save())
+    best_model, best_epoch = deepcopy(model.param_to_save), -1
+    ckpts = []
 
     # Test Teacher first
-    if not args.train_teacher:
+    if args.model.lower() != "scratch":
         logger.log('-' * 40 + "Teacher" + '-' * 40, pre=False)
         tmp_evaluator = Evaluator(args)
         tmp_model = KD.Scratch(args, Teacher).cuda()
@@ -100,13 +104,24 @@ def main(args):
             if early_stop:
                 break
             if is_improved:
-                best_model, save_path = deepcopy(model.save())
+                best_model = deepcopy(model.param_to_save)
+                best_epoch = epoch
+        
+        # save intermediate checkpoints
+        if not args.no_save and args.ckpt_interval != -1 and epoch % args.ckpt_interval == 0 and epoch != 0:
+            ckpts.append(deepcopy(model.param_to_save))
     
     eval_dict = evaluator.eval_dict
     Evaluator.print_final_result(logger, eval_dict)
     if not args.no_save:
-        os.makedirs(os.path.dirname(save_path), exist_ok=True)
-        torch.save(best_model, save_path)
+        embedding_dim = Teacher.embedding_dim if args.train_teacher else Student.embedding_dim
+        save_dir = os.path.join("checkpoints", args.dataset, args.backbone, f"{args.model.lower()}-{embedding_dim}")
+        os.makedirs(save_dir, exist_ok=True)
+        torch.save(best_model, os.path.join(save_dir, "BEST_EPOCH.pt"))
+        for idx, ckpt in enumerate(ckpts):
+            if (idx + 1) * args.ckpt_interval >= best_epoch:
+                break
+            torch.save(ckpt, os.path.join(save_dir, f"EPOCH_{(idx + 1) * args.ckpt_interval}.pt"))
 
     return eval_dict
 

@@ -16,6 +16,8 @@ python -u main.py --dataset=citeulike --backbone=bpr --model=scratch --student e
 python -u main.py --dataset=citeulike --backbone=lightgcn --model=scratch --student embedding_dim=20 --cfg wd=1e-3 num_layers=3 --suffix student
 
 # KD
+# For HetComp, you need to pre-save teacher checkpoints through:
+python -u main.py --dataset=citeulike --backbone=bpr --train_teacher --teacher embedding_dim=400 --cfg wd=1e-3 --no_log --ckpt_interval=50
 python -u main.py --dataset=citeulike --backbone=bpr --model=hetcomp
 python -u main.py --dataset=citeulike --backbone=bpr --model=nkd
 python -u main.py --dataset=citeulike --backbone=bpr --model=graphd

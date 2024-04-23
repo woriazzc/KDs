@@ -51,5 +51,6 @@ class BaseKD(nn.Module):
         loss = base_loss + self.lmbda * kd_loss
         return loss
 
-    def save(self):
-        return self.student.state_dict(), os.path.join("checkpoints", self.args.dataset, self.args.backbone, f"{self.args.model.lower()}-{self.student.embedding_dim}.pt")
+    @property
+    def param_to_save(self):
+        return self.student.state_dict()
