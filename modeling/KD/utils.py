@@ -48,7 +48,7 @@ class Normalize(nn.Module):
 
 class Expert(nn.Module):
     def __init__(self, dims):
-        super(Expert, self).__init__()
+        super().__init__()
         mlps = []
         for i in range(len(dims) - 2):
             mlps.append(nn.Linear(dims[i], dims[i + 1]))
@@ -60,18 +60,31 @@ class Expert(nn.Module):
         return self.mlp(x)
 
 
-class nosepExpert(nn.Module):
-    def __init__(self, input_dim, output_dim, num_experts, is_teacher=False, norm=True):
+class fullExpert(nn.Module):
+    def __init__(self, dims, dropout_rate):
+        super().__init__()
+        mlps = []
+        for i in range(len(dims) - 2):
+            mlps.append(nn.Dropout(dropout_rate))
+            mlps.append(nn.Linear(dims[i], dims[i + 1]))
+            # mlps.append(nn.BatchNorm1d(dims[i + 1]))
+            mlps.append(nn.ReLU())
+        mlps.append(nn.Dropout(dropout_rate))
+        mlps.append(nn.Linear(dims[-2], dims[-1]))
+        self.mlp = nn.Sequential(*mlps)
+
+    def forward(self, x):
+        return self.mlp(x)
+
+class Projector(nn.Module):
+    def __init__(self, input_dim, output_dim, num_experts, norm=True, dropout_rate=0.):
         super().__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.num_experts = num_experts
         self.norm = norm
-        if is_teacher:
-            self.experts = nn.ModuleList([nn.Linear(self.input_dim, self.output_dim) for i in range(self.num_experts)])
-        else:
-            expert_dims = [self.input_dim, (self.input_dim + self.output_dim) // 2, self.output_dim]
-            self.experts = nn.ModuleList([Expert(expert_dims) for i in range(self.num_experts)])
+        expert_dims = [self.input_dim, (self.input_dim + self.output_dim) // 2, self.output_dim]
+        self.experts = nn.ModuleList([fullExpert(expert_dims, dropout_rate) for i in range(self.num_experts)])
 
     def forward_experts(self, x, experts, reduction=True):
         expert_outputs = [experts[i](x).unsqueeze(-1) for i in range(self.num_experts)]
