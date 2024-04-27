@@ -12,19 +12,11 @@ import scipy.sparse as sp
 from scipy.sparse import csr_matrix
 
 from .base_model import BaseRec, BaseGCN
-from .utils import convert_sp_mat_to_sp_tensor
+from .utils import convert_sp_mat_to_sp_tensor, BehaviorAggregator
 
 
 class BPR(BaseRec):
     def __init__(self, dataset, args):
-        """
-        Parameters
-        ----------
-        num_users : int
-        num_users : int
-        dim : int
-            embedding dimension
-        """
         super(BPR, self).__init__(dataset, args)
 
         self.init_std = args.init_std
@@ -46,7 +38,7 @@ class BPR(BaseRec):
         ----------
         batch_user : 1-D LongTensor (batch_size)
         batch_pos_item : 1-D LongTensor (batch_size)
-        batch_neg_item : 1-D LongTensor (batch_size)
+        batch_neg_item : 2-D LongTensor (batch_size, num_ns)
 
         Returns
         -------
@@ -54,12 +46,12 @@ class BPR(BaseRec):
             Model output to calculate its loss function
         """
         
-        u = self.user_emb(batch_user)
-        i = self.item_emb(batch_pos_item)
-        j = self.item_emb(batch_neg_item)
+        u = self.user_emb(batch_user)       # batch_size, dim
+        i = self.item_emb(batch_pos_item)   # batch_size, dim
+        j = self.item_emb(batch_neg_item)   # batch_size, num_ns, dim
         
-        pos_score = (u * i).sum(dim=1, keepdim=True)
-        neg_score = (u * j).sum(dim=1, keepdim=True)
+        pos_score = (u * i).sum(dim=1, keepdim=True)    # batch_size, 1
+        neg_score = torch.bmm(j, u.unsqueeze(-1)).squeeze(-1)       # batch_size, num_ns
 
         return pos_score, neg_score
 
@@ -75,14 +67,11 @@ class BPR(BaseRec):
         -------
         score : 2-D FloatTensor (batch_size x k)
         """
-
-        batch_user = batch_user.unsqueeze(-1)
-        batch_user = torch.cat(batch_items.size(1) * [batch_user], 1)
         
-        u = self.user_emb(batch_user)		# batch_size x k x dim
+        u = self.user_emb(batch_user)		# batch_size x dim
         i = self.item_emb(batch_items)		# batch_size x k x dim
         
-        score = (u * i).sum(dim=-1, keepdim=False)
+        score = torch.bmm(i, u.unsqueeze(-1)).squeeze(-1)   # batch_size, k
         
         return score
 
@@ -248,47 +237,121 @@ class LightGCN(BaseGCN):
         return users, items
 
 
-# based on https://github.com/liu-jc/PyTorch_NGCF/blob/master/NGCF/Models.py
-class NGCF(LightGCN):
+# Refer to https://github.com/reczoo/RecZoo/blob/main/matching/cf/SimpleX/src/SimpleX.py
+class SimpleX(BaseRec):
     def __init__(self, dataset, args):
         super().__init__(dataset, args)
-        self.dropout_list = nn.ModuleList()
-        self.GC_Linear_list = nn.ModuleList()
-        self.Bi_Linear_list = nn.ModuleList()
-        self.weight_size = [self.embedding_dim] * self.num_layers
-        self.weight_size = [self.embedding_dim] + self.weight_size
-        dropout_list = [args.dropout_rate] * self.num_layers
-        for i in range(self.num_layers):
-            self.GC_Linear_list.append(nn.Linear(self.weight_size[i], self.weight_size[i + 1]))
-            self.Bi_Linear_list.append(nn.Linear(self.weight_size[i], self.weight_size[i + 1]))
-            self.dropout_list.append(nn.Dropout(dropout_list[i]))
+        self.init_std = args.init_std
+        self.embedding_dim = args.embedding_dim
+        self.aggregator = "mean"    # Only support arrgregator='mean', which performs best in the paper
+        self.dropout_rate = args.simplex_dropout_rate
+        self.similarity_score = args.simplex_similarity_score
+        self.gamma = args.simplex_gamma
+        self.margin = args.simplex_margin
+        self.max_len = args.simplex_max_len
+        self.negative_weight = args.simplex_negative_weight
+        self.pad_id = self.num_items
 
-    def computer(self):
-        """
-        propagate methods for NGCF
-        """
-        users_emb = self.user_emb.weight
-        items_emb = self.item_emb.weight
-        ego_embeddings = torch.cat([users_emb, items_emb])
-        ngcf_out = [ego_embeddings]
-        if self.dropout:
-            if self.training:
-                g_droped = self._dropout(self.keep_prob)
-            else:
-                g_droped = self.Graph
-        else:
-            g_droped = self.Graph
+        self.user_emb = nn.Embedding(self.num_users, self.embedding_dim)
+        self.item_emb = nn.Embedding(self.num_items + 1, self.embedding_dim, padding_idx=self.pad_id)
+
+        self.user_history = self.create_user_history()
+        self.behavior_aggregation = BehaviorAggregator(self.embedding_dim, gamma=self.gamma, aggregator=self.aggregator)
+
+        self.dropout = nn.Dropout(self.dropout_rate)
+
+        self.reset_para()
+
+    def reset_para(self):
+        for m in self.modules():
+            if type(m) == nn.Linear:
+                nn.init.xavier_normal_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif type(m) == nn.Embedding:
+                nn.init.normal_(m.weight, mean=0., std=self.init_std)
+
+    def create_user_history(self):
+        train_dict = self.dataset.train_dict
+        user_history = []
+        for u in self.user_list:
+            history = train_dict[u.item()][-self.max_len:]
+            if len(history) < self.max_len: history = torch.cat([torch.ones(self.max_len - len(history), dtype=history.dtype), history], dim=0)
+            user_history.append(history)
+        user_history = torch.stack(user_history, dim=0)
+        return user_history.cuda()
         
-        for i in range(self.num_layers):
-            side_embeddings = torch.sparse.mm(g_droped, ego_embeddings)
-            sum_embeddings = F.leaky_relu(self.GC_Linear_list[i](side_embeddings))
-            bi_embeddings = torch.mul(ego_embeddings, side_embeddings)
-            bi_embeddings = F.leaky_relu(self.Bi_Linear_list[i](bi_embeddings))
-            ego_embeddings = sum_embeddings + bi_embeddings
-            ego_embeddings = self.dropout_list[i](ego_embeddings)
-            norm_embeddings = F.normalize(ego_embeddings, p=2, dim=1)
-            ngcf_out += [norm_embeddings]
+    def user_tower(self, batch_user):
+        uid_emb = self.user_emb(batch_user)
+        user_history_emb = self.item_emb(self.user_history[batch_user])
+        user_vec = self.behavior_aggregation(uid_emb, user_history_emb)
+        if self.similarity_score == "cosine":
+            user_vec = F.normalize(user_vec)
+        user_vec = self.dropout(user_vec)
+        return user_vec
+
+    def item_tower(self, batch_item):
+        item_vec = self.item_emb(batch_item)
+        if self.similarity_score == "cosine":
+            item_vec = F.normalize(item_vec)
+        return item_vec
+
+    def forward(self, batch_user, batch_pos_item, batch_neg_item):
+        """
+        Parameters
+        ----------
+        batch_user : 1-D LongTensor (batch_size)
+        batch_pos_item : 1-D LongTensor (batch_size)
+        batch_neg_item : 2-D LongTensor (batch_size, num_ns)
+
+        Returns
+        -------
+        output : 
+            Model output to calculate its loss function
+        """
         
-        all_embeddings = torch.cat(ngcf_out, dim=1)
-        users, items = torch.split(all_embeddings, [self.num_users, self.num_items])
+        u = self.user_tower(batch_user)
+        i = self.item_tower(batch_pos_item)
+        j = self.item_tower(batch_neg_item)
+        
+        pos_score = (u * i).sum(dim=1, keepdim=True)    # batch_size, 1
+        neg_score = torch.bmm(j, u.unsqueeze(-1)).squeeze(-1)       # batch_size, num_ns
+        return pos_score, neg_score
+    
+    def get_loss(self, output):
+        pos_score, neg_score = output[0], output[1]
+        pos_loss = torch.relu(1. - pos_score)
+        neg_loss = torch.relu(neg_score - self.margin)
+        loss = pos_loss + neg_loss.mean(dim=-1) * self.negative_weight
+        return loss.sum()
+
+    def forward_multi_items(self, batch_user, batch_items):
+        u = self.user_tower(batch_user)		# batch_size x dim
+        i = self.item_tower(batch_items)		# batch_size x k x dim
+        
+        score = torch.bmm(i, u.unsqueeze(-1)).squeeze(-1)   # batch_size, k
+        
+        return score
+
+    def get_user_embedding(self, batch_user):
+        return self.user_tower(batch_user)
+    
+    def get_item_embedding(self, batch_item):
+        return self.item_tower(batch_item)
+
+    def get_all_embedding(self):
+        users = self.user_tower(self.user_list)
+        items = self.item_tower(self.item_list)
+
         return users, items
+    
+    def get_all_ratings(self):
+        users, items = self.get_all_embedding()
+        score_mat = torch.matmul(users, items.T)
+        return score_mat
+    
+    def get_ratings(self, batch_user):
+        users, items = self.get_all_embedding()
+        users = users[batch_user]
+        score_mat = torch.matmul(users, items.T)
+        return score_mat
