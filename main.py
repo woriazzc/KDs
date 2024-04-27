@@ -78,9 +78,9 @@ def main(args):
         logger.log('Training...')
         
         for idx, (batch_user, batch_pos_item, batch_neg_item) in enumerate(train_loader):
-            batch_user = batch_user.cuda()
-            batch_pos_item = batch_pos_item.cuda()
-            batch_neg_item = batch_neg_item.cuda()
+            batch_user = batch_user.cuda()      # batch_size
+            batch_pos_item = batch_pos_item.cuda()  # batch_size
+            batch_neg_item = batch_neg_item.cuda()  # batch_size, num_ns
             
             # Forward Pass
             model.train()

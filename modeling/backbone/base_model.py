@@ -55,7 +55,8 @@ class BaseRec(nn.Module):
         loss : float
         """
         pos_score, neg_score = output[0], output[1]
-        loss = -F.logsigmoid(pos_score - neg_score).sum()
+        pos_score = pos_score.expand_as(neg_score)  # batch_size, num_ns
+        loss = -F.logsigmoid(pos_score - neg_score).mean(1).sum()
         return loss
 
 
@@ -85,7 +86,7 @@ class BaseGCN(BaseRec):
         ----------
         batch_user : 1-D LongTensor (batch_size)
         batch_pos_item : 1-D LongTensor (batch_size)
-        batch_neg_item : 1-D LongTensor (batch_size)
+        batch_neg_item : 2-D LongTensor (batch_size, num_ns)
 
         Returns
         -------
@@ -98,8 +99,8 @@ class BaseGCN(BaseRec):
         i = all_items[batch_pos_item]
         j = all_items[batch_neg_item]
         
-        pos_score = (u * i).sum(dim=1, keepdim=True)
-        neg_score = (u * j).sum(dim=1, keepdim=True)
+        pos_score = (u * i).sum(dim=1, keepdim=True)    # batch_size, 1
+        neg_score = torch.bmm(j, u.unsqueeze(-1)).squeeze(-1)       # batch_size, num_ns
 
         return pos_score, neg_score
     
@@ -140,14 +141,11 @@ class BaseGCN(BaseRec):
         score : 2-D FloatTensor (batch_size x k)
         """
         all_users, all_items = self.computer()
-
-        batch_user = batch_user.unsqueeze(-1)
-        batch_user = torch.cat(batch_items.size(1) * [batch_user], 1)
         
-        u = all_users[batch_user]		# batch_size x k x dim
+        u = all_users[batch_user]		# batch_size x dim
         i = all_items[batch_items]		# batch_size x k x dim
         
-        score = (u * i).sum(dim=-1, keepdim=False)
+        score = torch.bmm(i, u.unsqueeze(-1)).squeeze(-1)   # batch_size, k
         
         return score
     

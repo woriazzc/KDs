@@ -100,6 +100,8 @@ class implicit_CF_dataset(data.Dataset):
         self.item_pop = item_pop
         self.num_ns = num_ns
 
+        self.users, self.pos_items, self.neg_items = None, None, None
+
     def negative_sampling(self):
         """conduct the negative sampling
         """
@@ -108,25 +110,26 @@ class implicit_CF_dataset(data.Dataset):
         neg_items = []
         for user, pos in self.train_dict.items():
             pos = pos.numpy()
-            users.append(np.array([user]).repeat(len(pos) * self.num_ns))
-            pos_items.append(pos.repeat(self.num_ns))
+            users.append(np.array([user]).repeat(len(pos)))
+            pos_items.append(pos)
             neg_candidates = np.arange(self.num_items)
             probs = np.ones(self.num_items)
             probs[pos] = 0
             probs /= np.sum(probs)
-            neg = np.random.choice(neg_candidates, size=len(pos) * self.num_ns, p=probs, replace=True)
+            neg = np.random.choice(neg_candidates, size=len(pos) * self.num_ns, p=probs, replace=True).reshape(len(pos), self.num_ns)
             neg_items.append(neg)
         users = np.concatenate(users, axis=0)
         pos_items = np.concatenate(pos_items, axis=0)
         neg_items = np.concatenate(neg_items, axis=0)
-        self.train_arr = np.stack([users, pos_items, neg_items], axis=1)
-        self.train_arr = torch.LongTensor(self.train_arr)
+        self.users = torch.from_numpy(users)
+        self.pos_items = torch.from_numpy(pos_items)
+        self.neg_items = torch.from_numpy(neg_items)
     
     def __len__(self):
-        return len(self.train_pairs) * self.num_ns
+        return len(self.train_pairs)
     
     def __getitem__(self, idx):
-        return self.train_arr[idx][0], self.train_arr[idx][1], self.train_arr[idx][2]
+        return self.users[idx], self.pos_items[idx], self.neg_items[idx]
         
 
 #################################################################################################################

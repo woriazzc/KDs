@@ -133,7 +133,7 @@ class RD(BaseKD):
             else:
                 return (static_weights * dynamic_weights).cuda()
 
-    def get_loss(self, batch_users):
+    def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
         dynamic_samples = self.dynamic_samples[batch_users]
         dynamic_scores = self.student.forward_multi_items(batch_users, dynamic_samples).detach()
         topk_teacher = self.RANK[batch_users]
@@ -209,7 +209,7 @@ class CD(BaseKD):
         self.rank_samples = self.rank_samples.cuda().long()
 
 
-    def get_loss(self, batch_users):
+    def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
         random_samples = self.rank_samples[batch_users, :]
         samples_scores_T = self.teacher.forward_multi_items(batch_users, random_samples)
         samples_scores_S = self.student.forward_multi_items(batch_users, random_samples)
@@ -557,6 +557,7 @@ class HTD(BaseKD):
         return total_loss
     
     def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+        batch_neg_item = batch_neg_item.reshape(batch_neg_item.shape[0], -1)
         ## Group Assignment
         GA_loss_user = self.get_GA_loss(batch_user.unique(), is_user=True)
         GA_loss_item = self.get_GA_loss(torch.cat([batch_pos_item, batch_neg_item], 0).unique(), is_user=False)
@@ -746,7 +747,7 @@ class UnKD(BaseKD):
         self.neg_items = self.neg_items.long().cuda()
         self.item_tag = self.item_tag.cuda()
 
-    def get_loss(self, batch_users):
+    def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
         pos_samples = self.pos_items[batch_users]
         neg_samples = self.neg_items[batch_users]
         weight_samples = self.item_tag[batch_users]
