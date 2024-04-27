@@ -7,5 +7,5 @@ lmbda: 0.5
 graphd_num_experts: 5
 graphd_K: 5
 graphd_alpha: 0.7
-graphd_keep_prob: 1.0
+graphd_keep_prob: 0.7
 graphd_dropout_rate: 0.2
