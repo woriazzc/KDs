@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .utils import Normalize, Expert, nosepExpert, pca, load_pkls, dump_pkls
+from .utils import Projector, pca, load_pkls, dump_pkls
 from .base_model import BaseKD
 
 
@@ -34,8 +34,8 @@ class CPD(BaseKD):
         ranking_list = torch.exp(-(torch.arange(self.mxK) + 1) / self.T)
         self.ranking_mat = ranking_list.repeat(self.num_users, 1)
 
-        self.S_user_experts = nosepExpert(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
-        self.S_item_experts = nosepExpert(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
+        self.S_user_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
+        self.S_item_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
 
     def get_topk_dict(self):
         print('Generating Top-K dict...')
@@ -141,31 +141,42 @@ class CPD(BaseKD):
 class NKD(BaseKD):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
+        self.model_name = "nkd"
 
         self.num_experts = args.nkd_num_experts
         self.strategy = args.nkd_strategy
         self.alpha = args.nkd_alpha
         self.K = args.nkd_K
+        self.dropout_rate = args.nkd_dropout_rate
         
         self.student_dim = self.student.embedding_dim
         self.teacher_dim = self.teacher.embedding_dim
 
-        self.S_user_experts = nosepExpert(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
-        self.S_item_experts = nosepExpert(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
+        self.S_user_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True, dropout_rate=self.dropout_rate)
+        self.S_item_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True, dropout_rate=self.dropout_rate)
 
         all_u, all_i = self.teacher.get_all_embedding()
-        self.nearestK_u = self.get_nearest_K(all_u, self.K)
-        self.nearestK_i = self.get_nearest_K(all_i, self.K)
-    
+        self.nearestK_u, self.nearestK_i = self.get_nearest_K(all_u, all_i, self.K)
+
     def get_params_to_update(self):
         return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
 
-    def get_nearest_K(self, embs, K):
+    def _KNN(self, embs, K):
         with torch.no_grad():
             embs = pca(embs, 150)
             topk_indices = knn(embs, embs, k=K+1)[1].reshape(-1, K + 1)
         return topk_indices[:, 1:].cuda()
 
+    def get_nearest_K(self, all_u, all_i, K):
+        f_nearestK_u = os.path.join("modeling", "KD", "crafts", self.model_name, f"nearest_{K}_u.pkl")
+        f_nearestK_i = os.path.join("modeling", "KD", "crafts", self.model_name, f"nearest_{K}_i.pkl")
+        sucflg, nearestK_u, nearestK_i = load_pkls(f_nearestK_u, f_nearestK_i)
+        if not sucflg:
+            nearestK_u = self._KNN(all_u, K)
+            nearestK_i = self._KNN(all_i, K)
+            dump_pkls((nearestK_u, f_nearestK_u), (nearestK_i, f_nearestK_i))
+        return nearestK_u, nearestK_i
+    
     def get_features(self, batch_entity, is_user):
         N = batch_entity.shape[0]
         if is_user:
@@ -203,6 +214,21 @@ class NKD(BaseKD):
             rndT = random.random() * self.alpha * 2
             S = rndS * S + (1. - rndS) * neighborsS
             T = rndT * T + (1. - rndT) * neighborsT
+        elif self.strategy == 'batchmix':
+            rndS = torch.rand((N, 1), device='cuda')
+            rndT = torch.rand((N, 1), device='cuda')
+            S = rndS * S + (1. - rndS) * neighborsS
+            T = rndT * T + (1. - rndT) * neighborsT
+        elif self.strategy == 'layermix':
+            rndS = torch.rand((1, S.size(1)), device='cuda')
+            rndT = torch.rand((1, T.size(1)), device='cuda')
+            S = rndS * S + (1. - rndS) * neighborsS
+            T = rndT * T + (1. - rndT) * neighborsT
+        elif self.strategy == 'allmix':
+            rndS = torch.rand((1, S.size(1)), device='cuda') * torch.rand((N, 1), device='cuda')
+            rndT = torch.rand((1, T.size(1)), device='cuda') * torch.rand((N, 1), device='cuda')
+            S = rndS * S + (1. - rndS) * neighborsS
+            T = rndT * T + (1. - rndT) * neighborsT
         elif self.strategy == 'hardmix':
             rndS = random.random()
             if rndS >= self.alpha:
@@ -238,68 +264,100 @@ class NKD(BaseKD):
 class GraphD(BaseKD):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
+        self.model_name = "graphd"
 
         self.num_experts = args.graphd_num_experts
         self.alpha = args.graphd_alpha
         self.K = args.graphd_K
+        self.keep_prob = args.graphd_keep_prob
+        self.dropout_rate = args.graphd_dropout_rate
         
         self.student_dim = self.student.embedding_dim
         self.teacher_dim = self.teacher.embedding_dim
 
-        self.S_user_experts = nosepExpert(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
-        self.S_item_experts = nosepExpert(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
+        self.S_user_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True, dropout_rate=self.dropout_rate)
+        self.S_item_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True, dropout_rate=self.dropout_rate)
 
         all_u, all_i = self.teacher.get_all_embedding()
-        self.nearestK_u = self.get_nearest_K(all_u, self.K) # |U|, K
-        self.nearestK_i = self.get_nearest_K(all_i, self.K) # |I|, K
-        self.Graph_u = self.construct_knn_graph(self.nearestK_u, self.alpha)
-        self.Graph_i = self.construct_knn_graph(self.nearestK_i, self.alpha)
-        self.T_users_emb, self.T_items_emb = self.computer(self.teacher.user_emb.weight, self.teacher.item_emb.weight, self.Graph_u, self.Graph_i)
+        nearestK_u, nearestK_i = self.get_nearest_K(all_u, all_i, self.K)
+        self.Graph_u = self.construct_knn_graph(nearestK_u)
+        self.Graph_i = self.construct_knn_graph(nearestK_i)
     
     def get_params_to_update(self):
         return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
 
-    def get_nearest_K(self, embs, K):
+    def _KNN(self, embs, K):
         with torch.no_grad():
             embs = pca(embs, 150)
             topk_indices = knn(embs, embs, k=K+1)[1].reshape(-1, K + 1)
         return topk_indices[:, 1:].cuda()
+
+    def get_nearest_K(self, all_u, all_i, K):
+        f_nearestK_u = os.path.join("modeling", "KD", "crafts", self.model_name, f"nearest_{K}_u.pkl")
+        f_nearestK_i = os.path.join("modeling", "KD", "crafts", self.model_name, f"nearest_{K}_i.pkl")
+        sucflg, nearestK_u, nearestK_i = load_pkls(f_nearestK_u, f_nearestK_i)
+        if not sucflg:
+            nearestK_u = self._KNN(all_u, K)
+            nearestK_i = self._KNN(all_i, K)
+            dump_pkls((nearestK_u, f_nearestK_u), (nearestK_i, f_nearestK_i))
+        return nearestK_u, nearestK_i
     
-    def construct_knn_graph(self, neighbor_id, alpha):
+    def construct_knn_graph(self, neighbor_id):
         N, K = neighbor_id.shape
         row = torch.arange(N).repeat(K, 1).T.reshape(-1).cuda()
         col = neighbor_id.reshape(-1)
         index = torch.stack([row, col])
-        data = torch.ones(index.size(-1)).cuda() * (1. - alpha) / K
-        self_loop_idx = torch.stack([torch.arange(N), torch.arange(N)]).cuda()
-        self_loop_data = torch.ones(self_loop_idx.size(-1)).cuda() * alpha
-        # index = torch.cat([index, self_loop_idx], dim=1)
-        # data = torch.cat([data, self_loop_data])
+        data = torch.ones(index.size(-1)).cuda() / K
         Graph = torch.sparse_coo_tensor(index, data,
                                             torch.Size([N, N]), dtype=torch.float)
         Graph = Graph.coalesce()
         return Graph.cuda()
-    
-    def computer(self, users_emb, items_emb, Graph_u, Graph_i):
-        filtered_users_emb = torch.sparse.mm(Graph_u, users_emb)
-        filtered_items_emb = torch.sparse.mm(Graph_i, items_emb)
-        return filtered_users_emb, filtered_items_emb
 
-    def get_features(self, batch_entity, is_user, S_users_emb, S_items_emb):
-        N = batch_entity.shape[0]
+    def _dropout_graph(self, batch_entity, is_user):
+        size = (self.num_users, self.num_users) if is_user else (self.num_items, self.num_items)
+        Graph = self.Graph_u if is_user else self.Graph_i
+        index = Graph.indices().t()
+        values = Graph.values()
+        random_index = torch.rand(len(values)) + self.keep_prob
+        random_index = random_index.int().bool()
+        index = index[random_index]
+        values = values[random_index] / self.keep_prob
+
+        self_loop_idx = torch.stack([batch_entity, batch_entity], dim=1)
+        self_loop_data = torch.ones(self_loop_idx.size(0)).cuda()
+
+        rndS = random.random() * self.alpha * 2
+        rndT = random.random() * self.alpha * 2
+        valuesS = torch.cat([values * (1. - rndS), self_loop_data * rndS])
+        valuesT = torch.cat([values * (1. - rndT), self_loop_data * rndT])
+
+        index = torch.cat([index, self_loop_idx], dim=0)
+
+        droped_GraphS = torch.sparse_coo_tensor(index.t(), valuesS, size, dtype=torch.float)
+        droped_GraphT = torch.sparse_coo_tensor(index.t(), valuesT, size, dtype=torch.float)
+        return droped_GraphS, droped_GraphT
+
+    def get_features(self, batch_entity, is_user):
         if is_user:
-            T = self.T_users_emb[batch_entity]
-            S = S_users_emb[batch_entity]
+            T = self.teacher.user_emb.weight
+            S = self.student.user_emb.weight
             experts = self.S_user_experts
         else:
-            T = self.T_items_emb[batch_entity]
-            S = S_items_emb[batch_entity]
+            T = self.teacher.item_emb.weight
+            S = self.student.item_emb.weight
             experts = self.S_item_experts
+        
+        droped_GraphS, droped_GraphT = self._dropout_graph(batch_entity, is_user)
+        
+        S = torch.sparse.mm(droped_GraphS, S)
+        T = torch.sparse.mm(droped_GraphT, T)
+        T = T[batch_entity]
+        S = S[batch_entity]
         S = experts(S)
         return T, S
     
-    def get_DE_loss(self, batch_entity, is_user, S_users_emb, S_items_emb):
-        T_feas, S_feas = self.get_features(batch_entity, is_user, S_users_emb, S_items_emb)
+    def get_DE_loss(self, batch_entity, is_user):
+        T_feas, S_feas = self.get_features(batch_entity, is_user)
 
         norm_T = T_feas.pow(2).sum(-1, keepdim=True).pow(1. / 2)
         T_feas = T_feas.div(norm_T)
@@ -309,10 +367,9 @@ class GraphD(BaseKD):
         return DE_loss
 
     def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
-        S_users_emb, S_items_emb = self.computer(self.student.user_emb.weight, self.student.item_emb.weight, self.Graph_u, self.Graph_i)
-        DE_loss_user = self.get_DE_loss(batch_user.unique(), True, S_users_emb, S_items_emb)
-        DE_loss_pos = self.get_DE_loss(batch_pos_item.unique(), False, S_users_emb, S_items_emb)
-        DE_loss_neg = self.get_DE_loss(batch_neg_item.unique(), False, S_users_emb, S_items_emb)
+        DE_loss_user = self.get_DE_loss(batch_user.unique(), True)
+        DE_loss_pos = self.get_DE_loss(batch_pos_item.unique(), False)
+        DE_loss_neg = self.get_DE_loss(batch_neg_item.unique(), False)
 
         DE_loss = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
         return DE_loss
@@ -321,6 +378,7 @@ class GraphD(BaseKD):
 class FilterD(BaseKD):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
+        self.model_name = "filterd"
 
         self.num_experts = args.filterd_num_experts
         self.alpha = args.filterd_alpha
@@ -332,8 +390,8 @@ class FilterD(BaseKD):
         self.student_dim = self.student.embedding_dim
         self.teacher_dim = self.teacher.embedding_dim
 
-        self.S_user_experts = nosepExpert(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
-        self.S_item_experts = nosepExpert(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
+        self.S_user_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
+        self.S_item_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
 
         all_u, all_i = self.teacher.get_all_embedding()
         self.Graph_u_smooth, self.Graph_u_rough = self.cal_filters(all_u, self.K, self.smooth_ratio, self.rough_ratio)
@@ -432,6 +490,7 @@ class FilterD(BaseKD):
 class FD(BaseKD):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
+        self.model_name = "fd"
 
         self.num_experts = args.fd_num_experts
         self.alpha = args.fd_alpha
@@ -443,8 +502,8 @@ class FD(BaseKD):
         self.student_dim = self.student.embedding_dim
         self.teacher_dim = self.teacher.embedding_dim
 
-        self.S_user_experts = nosepExpert(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
-        self.S_item_experts = nosepExpert(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
+        self.S_user_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
+        self.S_item_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True)
 
         self.Graph_smooth, self.Graph_rough = self.construct_graph(self.smooth_ratio, self.rough_ratio)
         self.T_users_emb_smooth, self.T_items_emb_smooth = self.computer(self.teacher.user_emb.weight, self.teacher.item_emb.weight, self.Graph_smooth)
