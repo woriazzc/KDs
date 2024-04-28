@@ -12,7 +12,7 @@ import scipy.sparse as sp
 from scipy.sparse import csr_matrix
 
 from .base_model import BaseRec, BaseGCN
-from .utils import convert_sp_mat_to_sp_tensor, BehaviorAggregator
+from .utils import convert_sp_mat_to_sp_tensor, BehaviorAggregator, load_pkls, dump_pkls
 
 
 class BPR(BaseRec):
@@ -174,11 +174,17 @@ class LightGCN(BaseGCN):
         return Graph
 
     def construct_graph(self):
+        f_Graph = os.path.join("modeling", "backbone", "crafts", self.args.dataset, f"Graph.pkl")
+        sucflg, Graph = load_pkls(f_Graph)
+        if sucflg:
+            return Graph.cuda()
+        
         config = yaml.load(open(os.path.join(self.args.DATA_DIR, self.args.dataset, 'config.yaml'), 'r'), Loader=yaml.FullLoader)
         if "large" in config and config["large"] == True:
             Graph = self._construct_large_graph()
         else:
             Graph = self._construct_small_graph()
+        dump_pkls((Graph, f_Graph))
         return Graph.cuda()
 
     def _dropout_x(self, x, keep_prob):
