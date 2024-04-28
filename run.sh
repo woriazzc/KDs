@@ -23,6 +23,7 @@ python -u main.py --dataset=citeulike --backbone=bpr --model=hetcomp
 python -u main.py --dataset=citeulike --backbone=bpr --model=nkd
 python -u main.py --dataset=citeulike --backbone=bpr --model=graphd
 python -u main.py --dataset=citeulike --backbone=bpr --model=filterd
+python -u main.py --dataset=citeulike --backbone=bpr --model=gdcp
 
 
 python -u main.py --dataset=foursquare --backbone=bpr --model=de

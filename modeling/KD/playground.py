@@ -313,9 +313,9 @@ class GraphD(BaseKD):
         Graph = Graph.coalesce()
         return Graph.cuda()
 
-    def _dropout_graph(self, batch_entity, is_user):
-        size = (self.num_users, self.num_users) if is_user else (self.num_items, self.num_items)
-        Graph = self.Graph_u if is_user else self.Graph_i
+    def _dropout_graph(self, Graph):
+        size = Graph.size()
+        assert size[0] == size[1]
         index = Graph.indices().t()
         values = Graph.values()
         random_index = torch.rand(len(values)) + self.keep_prob
@@ -323,7 +323,7 @@ class GraphD(BaseKD):
         index = index[random_index]
         values = values[random_index] / self.keep_prob
 
-        self_loop_idx = torch.stack([batch_entity, batch_entity], dim=1)
+        self_loop_idx = torch.stack([torch.arange(size[0]), torch.arange(size[0])], dim=1).cuda()
         self_loop_data = torch.ones(self_loop_idx.size(0)).cuda()
 
         rndS = random.random() * self.alpha * 2
@@ -342,12 +342,14 @@ class GraphD(BaseKD):
             T = self.teacher.user_emb.weight
             S = self.student.user_emb.weight
             experts = self.S_user_experts
+            Graph = self.Graph_u
         else:
             T = self.teacher.item_emb.weight
             S = self.student.item_emb.weight
             experts = self.S_item_experts
+            Graph = self.Graph_i
         
-        droped_GraphS, droped_GraphT = self._dropout_graph(batch_entity, is_user)
+        droped_GraphS, droped_GraphT = self._dropout_graph(Graph)
         
         S = torch.sparse.mm(droped_GraphS, S)
         T = torch.sparse.mm(droped_GraphT, T)
@@ -598,3 +600,68 @@ class FD(BaseKD):
 
         DE_loss = self.alpha * DE_loss_smooth + (1. - self.alpha) * DE_loss_rough
         return DE_loss
+
+
+class GDCP(GraphD):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        
+        self.alpha = args.cpd_alpha
+
+    def get_features(self, batch_entity, is_user, is_reg=False):
+        if is_user:
+            T = self.teacher.user_emb.weight
+            S = self.student.user_emb.weight
+            experts = self.S_user_experts
+            Graph = self.Graph_u
+        else:
+            T = self.teacher.item_emb.weight
+            S = self.student.item_emb.weight
+            experts = self.S_item_experts
+            Graph = self.Graph_i
+        
+        droped_GraphS, droped_GraphT = self._dropout_graph(Graph)
+        
+        S = torch.sparse.mm(droped_GraphS, S)
+        T = torch.sparse.mm(droped_GraphT, T)
+        T = T[batch_entity]
+        S = S[batch_entity]
+        if is_reg:
+            pre_S = S.detach().clone()
+        else:
+            pre_S = S
+        post_S = experts(pre_S)
+        if is_reg:
+            return pre_S, post_S
+        else:
+            return T, post_S
+    
+    def get_reg(self, batch_user, batch_pos_item, batch_neg_item):
+        post_u_feas, pre_u_feas = self.get_features(batch_user, is_user=True, is_reg=True)
+        post_pos_feas, pre_pos_feas = self.get_features(batch_pos_item, is_user=False, is_reg=True)
+        post_neg_feas, pre_neg_feas = self.get_features(batch_neg_item, is_user=False, is_reg=True)
+
+        post_pos_score = (post_u_feas * post_pos_feas).sum(-1, keepdim=True)
+        post_neg_score = torch.bmm(post_neg_feas, post_u_feas.unsqueeze(-1)).squeeze(-1)
+        post_pos_score = post_pos_score.expand_as(post_neg_score)
+
+        pre_pos_score = (pre_u_feas * pre_pos_feas).sum(-1, keepdim=True)
+        pre_neg_score = torch.bmm(pre_neg_feas, pre_u_feas.unsqueeze(-1)).squeeze(-1)
+        pre_pos_score = pre_pos_score.expand_as(pre_neg_score)
+
+        reg1 = F.relu(-(post_pos_score - post_neg_score) * (pre_pos_score - pre_neg_score)).mean(1).sum()
+        return reg1
+
+    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+        DE_loss_user = self.get_DE_loss(batch_user.unique(), True)
+        DE_loss_pos = self.get_DE_loss(batch_pos_item.unique(), False)
+        DE_loss_neg = self.get_DE_loss(batch_neg_item.unique(), False)
+        DE_loss = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
+
+        if self.alpha != 0:
+            reg = self.get_reg(batch_user, batch_pos_item, batch_neg_item)
+        else:
+            reg = 0.
+        
+        loss = DE_loss + reg * self.alpha
+        return loss
