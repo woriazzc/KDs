@@ -1,14 +1,14 @@
 exp_name: gowalla_bpr_scratch
 command:
-    python -u main.py --dataset=gowalla --backbone=bpr --train_teacher --no_log --teacher embedding_dim={embedding_dim} --cfg wd={wd}
+    python -u main.py --dataset=gowalla --backbone=bpr --train_teacher --no_log --teacher embedding_dim={embedding_dim} --cfg wd={wd} --run_all
 params:
   - name: embedding_dim
-    values: [20, 300, 500, 700]
+    values: [100, 200]
   - name: wd
-    values: [1e-3, 1e-4, 1e-6]
-gpus: [0]        # available gpus
+    values: [1e-3, 1e-4, 1e-2, 1e-8]
+gpus: [1, 2]        # available gpus
 sampling: grid      # grid / random
 max_trials: 600     # only used when sampling='random'
 wait_second: 30         # seconds to wait between two runs
 max_util: 100           # wait until gpu util <= max_util
-max_memory: 21000       # wait until gpu memory <= max_memory
+max_memory: 6000       # wait until gpu memory <= max_memory
