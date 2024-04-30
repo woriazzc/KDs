@@ -4,6 +4,8 @@ lr: 1.e-3
 wd: 1.e-8
 lmbda: 0.5
 
+ablation: False
+
 graphd_num_experts: 5
 graphd_K: 5
 graphd_alpha: 0.7

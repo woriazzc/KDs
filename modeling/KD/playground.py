@@ -168,8 +168,8 @@ class NKD(BaseKD):
         return topk_indices[:, 1:].cuda()
 
     def get_nearest_K(self, all_u, all_i, K):
-        f_nearestK_u = os.path.join("modeling", "KD", "crafts", self.model_name, f"nearest_{K}_u.pkl")
-        f_nearestK_i = os.path.join("modeling", "KD", "crafts", self.model_name, f"nearest_{K}_i.pkl")
+        f_nearestK_u = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"nearest_{K}_u.pkl")
+        f_nearestK_i = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"nearest_{K}_i.pkl")
         sucflg, nearestK_u, nearestK_i = load_pkls(f_nearestK_u, f_nearestK_i)
         if not sucflg:
             nearestK_u = self._KNN(all_u, K)
@@ -265,6 +265,7 @@ class GraphD(BaseKD):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
         self.model_name = "graphd"
+        self.ablation = getattr(args, "ablation", False)
 
         self.num_experts = args.graphd_num_experts
         self.alpha = args.graphd_alpha
@@ -278,10 +279,13 @@ class GraphD(BaseKD):
         self.S_user_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True, dropout_rate=self.dropout_rate)
         self.S_item_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True, dropout_rate=self.dropout_rate)
 
-        all_u, all_i = self.teacher.get_all_embedding()
-        nearestK_u, nearestK_i = self.get_nearest_K(all_u, all_i, self.K)
-        self.Graph_u = self.construct_knn_graph(nearestK_u)
-        self.Graph_i = self.construct_knn_graph(nearestK_i)
+        if self.ablation:
+            self.Graph_u, self.Graph_i = None, None
+        else:
+            all_u, all_i = self.teacher.get_all_embedding()
+            nearestK_u, nearestK_i = self.get_nearest_K(all_u, all_i, self.K)
+            self.Graph_u = self.construct_knn_graph(nearestK_u)
+            self.Graph_i = self.construct_knn_graph(nearestK_i)
     
     def get_params_to_update(self):
         return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
@@ -293,8 +297,8 @@ class GraphD(BaseKD):
         return topk_indices[:, 1:].cuda()
 
     def get_nearest_K(self, all_u, all_i, K):
-        f_nearestK_u = os.path.join("modeling", "KD", "crafts", self.model_name, f"nearest_{K}_u.pkl")
-        f_nearestK_i = os.path.join("modeling", "KD", "crafts", self.model_name, f"nearest_{K}_i.pkl")
+        f_nearestK_u = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"nearest_{K}_u.pkl")
+        f_nearestK_i = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"nearest_{K}_i.pkl")
         sucflg, nearestK_u, nearestK_i = load_pkls(f_nearestK_u, f_nearestK_i)
         if not sucflg:
             nearestK_u = self._KNN(all_u, K)
@@ -349,10 +353,11 @@ class GraphD(BaseKD):
             experts = self.S_item_experts
             Graph = self.Graph_i
         
-        droped_GraphS, droped_GraphT = self._dropout_graph(Graph)
-        
-        S = torch.sparse.mm(droped_GraphS, S)
-        T = torch.sparse.mm(droped_GraphT, T)
+        if not self.ablation:
+            droped_GraphS, droped_GraphT = self._dropout_graph(Graph)
+            
+            S = torch.sparse.mm(droped_GraphS, S)
+            T = torch.sparse.mm(droped_GraphT, T)
         T = T[batch_entity]
         S = S[batch_entity]
         S = experts(S)
@@ -410,8 +415,8 @@ class FilterD(BaseKD):
         return topk_indices[:, 1:].cuda()
 
     def get_nearest_K(self, all_u, all_i, K):
-        f_nearestK_u = os.path.join("modeling", "KD", "crafts", self.model_name, f"nearest_{K}_u.pkl")
-        f_nearestK_i = os.path.join("modeling", "KD", "crafts", self.model_name, f"nearest_{K}_i.pkl")
+        f_nearestK_u = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"nearest_{K}_u.pkl")
+        f_nearestK_i = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"nearest_{K}_i.pkl")
         sucflg, nearestK_u, nearestK_i = load_pkls(f_nearestK_u, f_nearestK_i)
         if not sucflg:
             nearestK_u = self._KNN(all_u, K)
@@ -573,8 +578,8 @@ class FD(BaseKD):
         Graph = Graph.coalesce()
 
         smooth_dim = int(Graph.shape[0] * smooth_ratio)
-        f_smooth_values = os.path.join("modeling", "KD", "crafts", "fd", f"smooth_values_{smooth_dim}.pkl")
-        f_smooth_vectors = os.path.join("modeling", "KD", "crafts", "fd", f"smooth_vectors_{smooth_dim}.pkl")
+        f_smooth_values = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_values_{smooth_dim}.pkl")
+        f_smooth_vectors = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_vectors_{smooth_dim}.pkl")
         sucflg, smooth_values, smooth_vectors = load_pkls(f_smooth_values, f_smooth_vectors)
         if not sucflg:
             if smooth_ratio <= 0.3:
