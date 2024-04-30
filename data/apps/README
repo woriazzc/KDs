@@ -8,6 +8,7 @@ kcore4user: 10
 kcore4item: 10
 star4pos: 4
 ratios: (8, 1, 1)
+splitting: ROU
 
 Statistics:
 -----------

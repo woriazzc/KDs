@@ -1,14 +1,12 @@
-Chronologically-ordered Foursquare_TKY dataset.
-processed by preprocess_citeulike.py
-origin file "users.dat" downloaded from https://github.com/changun/CollMetric/tree/master/citeulike-t
+Chronologically-ordered Digital Music 2014 dataset.
 
 Config:
 -------
-filename: users.dat
-dataset: CiteULike
-kcore4user: 5
+filename: Amazon2014Digital
+dataset: Amazon2014Digital
+kcore4user: 10
 kcore4item: 0
-star4pos: 0
+star4pos: 4
 ratios: (8, 1, 1)
 splitting: ROU
 
@@ -17,5 +15,5 @@ Statistics:
 +-------+-------+---------------+--------+--------+-------+-----------------------+
 | #User | #Item | #Interactions | #Train | #Valid | #Test |        Density        |
 +-------+-------+---------------+--------+--------+-------+-----------------------+
-|  5219 | 25181 |     125580    | 98405  | 12451  | 14724 | 0.0009555649441405024 |
+|  5501 | 62901 |     111568    | 87099  | 10643  | 13826 | 0.0003224337193558674 |
 +-------+-------+---------------+--------+--------+-------+-----------------------+

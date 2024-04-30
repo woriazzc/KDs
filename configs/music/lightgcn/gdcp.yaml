@@ -12,11 +12,11 @@ graphd_dropout_rate: 0.2
 
 gdcp_reg_type: "second"
 gdcp_w_reg: 0.1
-gdcp_dec_epoch: 60
+gdcp_dec_epoch: 30
 
 gdcp_margin: 0.
 
 gdcp_Q: 50
 gdcp_T: 10
 gdcp_mxK: 1000
-gdcp_tau_ce: 0.01
+gdcp_tau_ce: 0.1

@@ -1,0 +1,11 @@
+epochs: 1000
+batch_size: 2048
+lr: 1.e-3
+wd: 1.e-8
+lmbda: 0.5
+
+nkd_num_experts: 5
+nkd_strategy: soft  # hard, soft, randmix, mix, hardmix, batchmix, layermix
+nkd_alpha: 0.5
+nkd_K: 5
+nkd_dropout_rate: 0.1

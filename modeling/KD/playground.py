@@ -645,6 +645,7 @@ class FD(BaseKD):
 class GDCP(GraphD):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
+        self.model_name = "gdcp"
 
         self.reg_type = args.gdcp_reg_type
         self.dec_epoch = args.gdcp_dec_epoch

@@ -17,7 +17,7 @@ def load_pii_dict(file_path, start_idx):
     
     with open(file_path, 'r') as f:
         for line in f:
-            u, i = line.strip().split()
+            u, i = line.strip().split()[:2]
             u = int(u) - start_idx
             i = int(i) - start_idx
             ui_pairs.append([u, i])
