@@ -332,6 +332,8 @@ class GraphD(BaseKD):
 
         rndS = random.random() * self.alpha * 2
         rndT = random.random() * self.alpha * 2
+        # rndS = torch.randn(1, device='cuda') * 0.05 + self.alpha
+        # rndT = torch.randn(1, device='cuda') * 0.05 + self.alpha
         valuesS = torch.cat([values * (1. - rndS), self_loop_data * rndS])
         valuesT = torch.cat([values * (1. - rndT), self_loop_data * rndT])
 
