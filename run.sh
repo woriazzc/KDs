@@ -10,6 +10,11 @@ python -u main.py --dataset=gowalla --backbone=lightgcn --train_teacher --teache
 
 python -u main.py --dataset=music --backbone=bpr --train_teacher --suffix teacher
 
+python -u main.py --dataset=books --backbone=bpr --train_teacher --suffix teacher
+
+python -u main.py --dataset=yelp18 --backbone=bpr --train_teacher --suffix teacher
+python -u main.py --dataset=yelp18 --backbone=lightgcn --train_teacher --suffix teacher
+
 #from scratch
 python -u main.py --dataset=foursquare --backbone=bpr --model=scratch --student embedding_dim=10 --cfg wd=0.01 --suffix student
 python -u main.py --dataset=foursquare --backbone=lightgcn --model=scratch --student embedding_dim=10 num_layers=1 --cfg wd=0.01 --suffix student
