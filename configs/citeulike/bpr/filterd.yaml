@@ -7,6 +7,7 @@ lmbda: 0.5
 filterd_num_experts: 5
 filterd_K: 5
 filterd_alpha: 0.7
-filterd_beta: 0.1
-filterd_keep_prob: 0.7
 filterd_dropout_rate: 0.2
+filterd_type: smooth  # smooth, rough
+filterd_eig_ratio: 1.0
+filterd_beta: 1.
