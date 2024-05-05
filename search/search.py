@@ -11,10 +11,11 @@ from itertools import product
 processes = []
 def handler(signum, frame):
     for p in processes:
-        try:
-            os.killpg(os.getpgid(p.pid), signal.SIGKILL)
-        except:
-            pass
+        # try:
+        #     os.killpg(os.getpgid(p.pid), signal.SIGKILL)
+        # except:
+        #     pass
+        pass
     sys.exit()
 
 
