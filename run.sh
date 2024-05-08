@@ -12,8 +12,8 @@ python -u main.py --dataset=music --backbone=bpr --train_teacher --suffix teache
 
 python -u main.py --dataset=books --backbone=bpr --train_teacher --suffix teacher
 
-python -u main.py --dataset=yelp18 --backbone=bpr --train_teacher --suffix teacher
-python -u main.py --dataset=yelp18 --backbone=lightgcn --train_teacher --suffix teacher
+python -u main.py --dataset=yelp --backbone=bpr --train_teacher --suffix teacher --teacher embedding_dim=300 --cfg wd=1e-4 --suffix teacher
+python -u main.py --dataset=yelp --backbone=lightgcn --train_teacher --suffix teacher
 
 #from scratch
 python -u main.py --dataset=foursquare --backbone=bpr --model=scratch --student embedding_dim=10 --cfg wd=0.01 --suffix student
@@ -26,10 +26,14 @@ python -u main.py --dataset=citeulike --backbone=simplex --model=scratch --stude
 python -u main.py --dataset=gowalla --backbone=bpr --model=scratch --student embedding_dim=20 --cfg wd=1e-3 --suffix student
 python -u main.py --dataset=gowalla --backbone=lightgcn --model=scratch --student embedding_dim=20 num_layers=4 --cfg wd=1e-7 --suffix student
 
+python -u main.py --dataset=yelp --backbone=bpr --model=scratch --student embedding_dim=20 --cfg wd=1e-3 --suffix student
+
 # KD
 # For HetComp, you need to pre-save teacher checkpoints through:
 python -u main.py --dataset=citeulike --backbone=bpr --train_teacher --teacher embedding_dim=400 --cfg wd=1e-3 --no_log --ckpt_interval=50
-python -u main.py --dataset=citeulike --backbone=bpr --model=hetcomp
+python -u main.py --dataset=citeulike --backbone=bpr --model=hetcomp --run_all
+python -u main.py --dataset=citeulike --backbone=bpr --model=de --run_all
+
 python -u main.py --dataset=citeulike --backbone=bpr --model=nkd
 python -u main.py --dataset=citeulike --backbone=bpr --model=graphd
 python -u main.py --dataset=citeulike --backbone=bpr --model=filterd
