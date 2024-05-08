@@ -1,5 +1,7 @@
 import os
 import time
+import mlflow
+import pickle
 import numpy as np
 from copy import deepcopy
 
@@ -61,6 +63,19 @@ def main(args):
         logger.log('-' * 40 + "Teacher" + '-' * 40, pre=False)
         tmp_evaluator = Evaluator(args)
         tmp_model = KD.Scratch(args, Teacher).cuda()
+
+        # # Test filterd Teacher. Must Delete!!
+        # f_all_vectors_i = "modeling/KD/crafts/citeulike/bpr/fd/smooth_vectors_i_25181.pkl"
+        # f_all_vectors_u = "modeling/KD/crafts/citeulike/bpr/fd/smooth_vectors_u_5219.pkl"
+        # all_vectors_i = pickle.load(open(f_all_vectors_i, "rb"))
+        # all_vectors_u = pickle.load(open(f_all_vectors_u, "rb"))
+        # vectors_i = all_vectors_i[:, :all_vectors_i.shape[1] // 4 * 3]
+        # filter_i = vectors_i.mm(vectors_i.t())
+        # vectors_u = all_vectors_u[:, :all_vectors_u.shape[1] // 4 * 3]
+        # filter_u = vectors_u.mm(vectors_u.t())
+        # Teacher.user_emb.weight.data = torch.sparse.mm(filter_u, Teacher.user_emb.weight)
+        # Teacher.item_emb.weight.data = torch.sparse.mm(filter_i, Teacher.item_emb.weight)
+
         is_improved, early_stop, eval_results, elapsed = tmp_evaluator.evaluate_while_training(tmp_model, -1, train_loader, testset)
         Evaluator.print_final_result(logger, tmp_evaluator.eval_dict)
         logger.log('-' * 88, pre=False)

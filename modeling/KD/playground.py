@@ -1,5 +1,6 @@
 import os
 import math
+import mlflow
 import random
 import numpy as np
 
@@ -527,11 +528,12 @@ class FD(BaseKD):
         self.model_name = "fd"
 
         self.num_experts = args.fd_num_experts
-        self.alpha = args.fd_alpha
-        self.K = args.fd_K
         self.dropout_rate = args.fd_dropout_rate
-        self.smooth_ratio = args.fd_smooth_ratio
-        self.rough_ratio = args.fd_rough_ratio
+        self.alpha = args.fd_alpha
+        self.beta = args.fd_beta
+        self.eig_ratio = args.fd_eig_ratio
+        self.num_anchors = args.fd_num_anchors
+        self.K = args.fd_K
         
         self.student_dim = self.student.embedding_dim
         self.teacher_dim = self.teacher.embedding_dim
@@ -543,6 +545,10 @@ class FD(BaseKD):
         nearestK_u, nearestK_i = self.get_nearest_K(all_u, all_i, self.K)
         self.filter_u = self.construct_knn_filter(nearestK_u, entity_type='u')
         self.filter_i = self.construct_knn_filter(nearestK_i, entity_type='i')
+
+        self.anchor_filters_u = self.construct_anchor_filters(entity_type='u')
+        self.anchor_filters_i = self.construct_anchor_filters(entity_type='i')
+        self.global_step = 0
     
     def get_params_to_update(self):
         return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
@@ -565,31 +571,14 @@ class FD(BaseKD):
     
     def construct_knn_filter(self, neighbor_id, entity_type):
         N, K = neighbor_id.shape
-        smooth_dim = int(self.smooth_ratio * N)
-        rough_dim = int(self.rough_ratio * N)
+        smooth_dim = int(N * self.eig_ratio)
         f_smooth_values = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_values_{entity_type}_{smooth_dim}.pkl")
         f_smooth_vectors = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_vectors_{entity_type}_{smooth_dim}.pkl")
-        f_rough_values = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"rough_values_{entity_type}_{smooth_dim}.pkl")
-        f_rough_vectors = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"rough_vectors_{entity_type}_{smooth_dim}.pkl")
-        sucflg, smooth_values, smooth_vectors, rough_values, rough_vectors = load_pkls(f_smooth_values, f_smooth_vectors, f_rough_values, f_rough_vectors)
+        sucflg, smooth_values, smooth_vectors = load_pkls(f_smooth_values, f_smooth_vectors)
         if sucflg:
-            values = torch.cat([smooth_values, rough_values])
-            vectors = torch.cat([smooth_vectors, rough_vectors], dim=1)
-            filter = (vectors * self.weight_feature(values)).mm(vectors.t())
+            filter = (smooth_vectors * self.weight_feature(smooth_values)).mm(smooth_vectors.t())
             return filter.cuda()
         
-        # try to load complete eig decomposition results
-        f_all_values = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_values_{entity_type}_{N}.pkl")
-        f_all_vectors = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_vectors_{entity_type}_{N}.pkl")
-        sucflg, all_values, all_vectors = load_pkls(f_all_values, f_all_vectors)
-        if sucflg:
-            smooth_values, smooth_vectors = all_values[:smooth_dim], all_vectors[:, :smooth_dim]
-            rough_values, rough_vectors = all_values[-rough_dim:], all_vectors[:, -rough_dim:]
-            values = torch.cat([smooth_values, rough_values])
-            vectors = torch.cat([smooth_vectors, rough_vectors], dim=1)
-            filter = (vectors * self.weight_feature(values)).mm(vectors.t())
-            return filter.cuda()
-
         row = torch.arange(N).repeat(K, 1).T.reshape(-1).cuda()
         col = neighbor_id.reshape(-1)
         index = torch.stack([row, col], dim=1)
@@ -605,19 +594,37 @@ class FD(BaseKD):
         Graph = (Graph.t() + Graph) / 2.
         Graph = self._sym_normalize(Graph)
 
-        assert self.rough_ratio <= 0.3, "rough filter is only supported when rough_ratio <= 0.3"
-        rough_values, rough_vectors = torch.lobpcg(Graph, k=smooth_dim, largest=False, niter=5)
-        smooth_vectors, smooth_values, _ = torch.svd_lowrank(Graph, q=smooth_dim, niter=10)
-        dump_pkls((smooth_values, f_smooth_values), (smooth_vectors, f_smooth_vectors),
-                  (rough_values, f_rough_values), (rough_vectors, f_rough_vectors))
-        values = torch.cat([smooth_values, rough_values])
-        vectors = torch.cat([smooth_vectors, rough_vectors], dim=1)
-        filter = (vectors * self.weight_feature(values)).mm(vectors.t())
+        if self.eig_ratio <= 0.3:
+            smooth_values, smooth_vectors = torch.lobpcg(Graph, k=smooth_dim, largest=True, niter=5)
+        else:
+            smooth_vectors, smooth_values, _ = torch.svd_lowrank(Graph, q=smooth_dim, niter=10)
+        dump_pkls((smooth_values, f_smooth_values), (smooth_vectors, f_smooth_vectors))
+        filter = (smooth_vectors * self.weight_feature(smooth_values)).mm(smooth_vectors.t())
         return filter.cuda()
     
+    def construct_anchor_filters(self, entity_type):
+        smooth_dim = self.num_users if entity_type == 'u' else self.num_items
+        f_all_values = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_values_{entity_type}_{smooth_dim}.pkl")
+        f_all_vectors = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_vectors_{entity_type}_{smooth_dim}.pkl")
+        sucflg, all_values, all_vectors = load_pkls(f_all_values, f_all_vectors)
+        assert sucflg, "Can't find eig decomposition results."
+        anchor_filters = []
+        blk = smooth_dim // self.num_anchors
+        for i in range(self.num_anchors):
+            vectors = all_vectors[:, blk * i:blk * (i + 1)]
+            filter = vectors.mm(vectors.t())
+            anchor_filters.append(filter.cuda())
+        return anchor_filters
+    
     def weight_feature(self, value):
-        # return torch.ones_like(value).reshape(1, -1)
-        return value.reshape(1, -1)
+        ## exp
+        # return torch.exp(self.beta * (value - value.max())).reshape(1, -1)
+        ## linear
+        # return torch.clip(self.beta * (value - value.max()) + 1., 0.).reshape(1, -1)
+        ## reverse linear
+        # return torch.clip(1. - self.beta * (value - value.min()), 0.).reshape(1, -1)
+        ## ideal low pass
+        return torch.cat([torch.ones_like(value[:len(value) // 4]), torch.zeros_like(value[len(value) // 4:])])
     
     def _sym_normalize(self, Graph):
         dense = Graph.to_dense().cpu()
@@ -660,9 +667,33 @@ class FD(BaseKD):
         FD_loss = G_diff.sum()
         return FD_loss
     
+    @torch.no_grad()
+    def log_anchor_loss(self, batch_entity, is_user):
+        if is_user:
+            T = self.teacher.user_emb.weight
+            S = self.student.user_emb.weight
+            experts = self.S_user_experts
+            anchor_filters = self.anchor_filters_u
+        else:
+            T = self.teacher.item_emb.weight
+            S = self.student.item_emb.weight
+            experts = self.S_item_experts
+            anchor_filters = self.anchor_filters_i
+        for idx, filter in enumerate(anchor_filters):
+            filtered_S = torch.sparse.mm(filter, S)
+            filtered_T = torch.sparse.mm(filter, T)
+            filtered_T = filtered_T[batch_entity]
+            filtered_S = filtered_S[batch_entity]
+            experts.eval()
+            filtered_S = experts(filtered_S)
+            experts.train()
+            loss = self.cal_FD_loss(filtered_T, filtered_S)
+            mlflow.log_metrics({f"anchor_loss_{idx}": (loss / batch_entity.shape[0]).cpu().item()}, step=self.global_step)
+
     def get_DE_loss(self, batch_entity, is_user):
         filtered_S, filtered_T = self.get_features(batch_entity, is_user)
         DE_loss = self.cal_FD_loss(filtered_T, filtered_S)
+        if is_user: self.log_anchor_loss(batch_entity, is_user)
         return DE_loss
 
     def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
@@ -671,6 +702,12 @@ class FD(BaseKD):
         DE_loss_neg = self.get_DE_loss(batch_neg_item.unique(), False)
 
         DE_loss = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
+
+        with torch.no_grad():
+            output = self.student(batch_user, batch_pos_item, batch_neg_item)
+            base_loss = self.student.get_loss(output)
+            mlflow.log_metrics({f"base_loss": (base_loss / batch_user.shape[0]).cpu().item()}, step=self.global_step)
+            self.global_step += 1
         return DE_loss
 
 
