@@ -256,6 +256,7 @@ class SimpleX(BaseRec):
         self.margin = args.simplex_margin
         self.max_len = args.simplex_max_len
         self.negative_weight = args.simplex_negative_weight
+        self.enable_bias = args.simplex_enable_bias
         self.pad_id = self.num_items
 
         self.user_emb = nn.Embedding(self.num_users, self.embedding_dim)
@@ -263,6 +264,11 @@ class SimpleX(BaseRec):
 
         self.user_history = self.create_user_history()
         self.behavior_aggregation = BehaviorAggregator(self.embedding_dim, gamma=self.gamma, aggregator=self.aggregator)
+
+        if self.enable_bias:
+            self.user_bias = nn.Embedding(self.num_users, 1)
+            self.item_bias = nn.Embedding(self.num_items + 1, 1, padding_idx=self.pad_id)
+            self.global_bias = nn.Parameter(torch.zeros(1))
 
         self.dropout = nn.Dropout(self.dropout_rate)
 
@@ -275,14 +281,19 @@ class SimpleX(BaseRec):
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
             elif type(m) == nn.Embedding:
-                nn.init.normal_(m.weight, mean=0., std=self.init_std)
+                if m.padding_idx is not None:
+                    # using the last index as padding_idx
+                    assert m.padding_idx == m.weight.shape[0] - 1
+                    nn.init.normal_(m.weight[0:-1, :], mean=0., std=self.init_std)
+                else:
+                    nn.init.normal_(m.weight, mean=0., std=self.init_std)
 
     def create_user_history(self):
         train_dict = self.dataset.train_dict
         user_history = []
         for u in self.user_list:
             history = train_dict[u.item()][-self.max_len:]
-            if len(history) < self.max_len: history = torch.cat([torch.ones(self.max_len - len(history), dtype=history.dtype), history], dim=0)
+            if len(history) < self.max_len: history = torch.cat([torch.ones(self.max_len - len(history), dtype=history.dtype) * self.pad_id, history], dim=0)
             user_history.append(history)
         user_history = torch.stack(user_history, dim=0)
         return user_history.cuda()
@@ -292,14 +303,18 @@ class SimpleX(BaseRec):
         user_history_emb = self.item_emb(self.user_history[batch_user])
         user_vec = self.behavior_aggregation(uid_emb, user_history_emb)
         if self.similarity_score == "cosine":
-            user_vec = F.normalize(user_vec)
+            user_vec = F.normalize(user_vec, dim=-1)
+        if self.enable_bias:
+            user_vec = torch.cat([user_vec, torch.ones(user_vec.size(0), 1).to(user_vec.device)], dim=-1)
         user_vec = self.dropout(user_vec)
         return user_vec
 
     def item_tower(self, batch_item):
         item_vec = self.item_emb(batch_item)
         if self.similarity_score == "cosine":
-            item_vec = F.normalize(item_vec)
+            item_vec = F.normalize(item_vec, dim=-1)
+        if self.enable_bias:
+            item_vec = torch.cat([item_vec, self.item_bias(batch_item)], dim=-1)
         return item_vec
 
     def forward(self, batch_user, batch_pos_item, batch_neg_item):
@@ -322,6 +337,9 @@ class SimpleX(BaseRec):
         
         pos_score = (u * i).sum(dim=1, keepdim=True)    # batch_size, 1
         neg_score = torch.bmm(j, u.unsqueeze(-1)).squeeze(-1)       # batch_size, num_ns
+        if self.enable_bias: # user_bias and global_bias only influence training, but not inference for ranking
+            pos_score += self.user_bias(batch_user) + self.global_bias
+            neg_score += self.user_bias(batch_user) + self.global_bias
         return pos_score, neg_score
     
     def get_loss(self, output):
@@ -329,14 +347,15 @@ class SimpleX(BaseRec):
         pos_loss = torch.relu(1. - pos_score)
         neg_loss = torch.relu(neg_score - self.margin)
         loss = pos_loss + neg_loss.mean(dim=-1) * self.negative_weight
-        return loss.sum()
+        return loss.mean()
 
     def forward_multi_items(self, batch_user, batch_items):
         u = self.user_tower(batch_user)		# batch_size x dim
         i = self.item_tower(batch_items)		# batch_size x k x dim
         
         score = torch.bmm(i, u.unsqueeze(-1)).squeeze(-1)   # batch_size, k
-        
+        if self.enable_bias:
+            score += self.user_bias(batch_user) + self.global_bias
         return score
 
     def get_user_embedding(self, batch_user):
@@ -348,16 +367,19 @@ class SimpleX(BaseRec):
     def get_all_embedding(self):
         users = self.user_tower(self.user_list)
         items = self.item_tower(self.item_list)
-
         return users, items
     
     def get_all_ratings(self):
         users, items = self.get_all_embedding()
         score_mat = torch.matmul(users, items.T)
+        if self.enable_bias:
+            score_mat += self.user_bias(self.user_list) + self.global_bias
         return score_mat
     
     def get_ratings(self, batch_user):
         users, items = self.get_all_embedding()
         users = users[batch_user]
         score_mat = torch.matmul(users, items.T)
+        if self.enable_bias:
+            score_mat += self.user_bias(batch_user.cuda()) + self.global_bias
         return score_mat
