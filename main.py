@@ -19,7 +19,7 @@ from utils import seed_all, avg_dict, Logger
 def main(args):
     # Dataset
     num_users, num_items, train_pairs, valid_pairs, test_pairs, train_dict, valid_dict, test_dict, train_matrix, user_pop, item_pop = load_data(args.dataset)
-    trainset = implicit_CF_dataset(args.dataset, num_users, num_items, train_pairs, train_matrix, train_dict, user_pop, item_pop, args.num_ns)
+    trainset = implicit_CF_dataset(args.dataset, num_users, num_items, train_pairs, train_matrix, train_dict, user_pop, item_pop, args.num_ns, args.neg_sampling_on_all)
     testset = implicit_CF_dataset_test(num_users, num_items, valid_dict, test_dict)
     train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True)
 

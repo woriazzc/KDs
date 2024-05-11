@@ -22,6 +22,7 @@ parser.add_argument('--suffix', type=str, default='')
 parser.add_argument('--dataset', type=str, default='gowalla')
 parser.add_argument('--batch_size', type=int, default=4096)
 parser.add_argument('--num_ns', type=int, default=1)
+parser.add_argument('--neg_sampling_on_all', action='store_true')
 
 parser.add_argument('--backbone', type=str, default='bpr')
 parser.add_argument('--model', type=str, default='rrd')

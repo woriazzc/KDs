@@ -65,7 +65,7 @@ def load_data(dataset_name):
 
 class implicit_CF_dataset(data.Dataset):
 
-    def __init__(self, dataset, num_users, num_items, train_pairs, train_mat, train_dict, user_pop, item_pop, num_ns):
+    def __init__(self, dataset, num_users, num_items, train_pairs, train_mat, train_dict, user_pop, item_pop, num_ns, neg_sampling_on_all=False):
         """
         Parameters
         ----------
@@ -87,6 +87,8 @@ class implicit_CF_dataset(data.Dataset):
             popularity of each item
         num_ns : int
             num. negative samples
+        neg_sampling_on_all: Bool
+            if True, don't ignore positive items when negative sampling (defalut: False)
         """
         super(implicit_CF_dataset, self).__init__()
         
@@ -99,6 +101,7 @@ class implicit_CF_dataset(data.Dataset):
         self.user_pop = user_pop
         self.item_pop = item_pop
         self.num_ns = num_ns
+        self.neg_sampling_on_all = neg_sampling_on_all
 
         self.users, self.pos_items, self.neg_items = None, None, None
 
@@ -108,19 +111,22 @@ class implicit_CF_dataset(data.Dataset):
         users = []
         pos_items = []
         neg_items = []
-        for user, pos in self.train_dict.items():
-            pos = pos.numpy()
-            users.append(np.array([user]).repeat(len(pos)))
-            pos_items.append(pos)
-            neg_candidates = np.arange(self.num_items)
-            probs = np.ones(self.num_items)
-            probs[pos] = 0
-            probs /= np.sum(probs)
-            neg = np.random.choice(neg_candidates, size=len(pos) * self.num_ns, p=probs, replace=True).reshape(len(pos), self.num_ns)
-            neg_items.append(neg)
-        users = np.concatenate(users, axis=0)
-        pos_items = np.concatenate(pos_items, axis=0)
-        neg_items = np.concatenate(neg_items, axis=0)
+        if self.neg_sampling_on_all:
+            users, pos_items = self.train_pairs[:, 0].numpy(), self.train_pairs[:, 1].numpy()
+            neg_items = np.random.choice(self.num_items, size=(self.train_pairs.size(0), self.num_ns), replace=True)
+        else:
+            for user, pos in self.train_dict.items():
+                pos = pos.numpy()
+                users.append(np.array([user]).repeat(len(pos)))
+                pos_items.append(pos)
+                probs = np.ones(self.num_items)
+                probs[pos] = 0
+                probs /= np.sum(probs)
+                neg = np.random.choice(self.num_items, size=len(pos) * self.num_ns, p=probs, replace=True).reshape(len(pos), self.num_ns)
+                neg_items.append(neg)
+            users = np.concatenate(users, axis=0)
+            pos_items = np.concatenate(pos_items, axis=0)
+            neg_items = np.concatenate(neg_items, axis=0)
         self.users = torch.from_numpy(users)
         self.pos_items = torch.from_numpy(pos_items)
         self.neg_items = torch.from_numpy(neg_items)
