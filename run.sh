@@ -4,6 +4,7 @@ python -u main.py --dataset=foursquare --backbone=lightgcn --train_teacher --tea
 
 python -u main.py --dataset=citeulike --backbone=bpr --train_teacher --teacher embedding_dim=400 --cfg wd=1e-3 --suffix teacher
 python -u main.py --dataset=citeulike --backbone=lightgcn --train_teacher --teacher embedding_dim=2000 num_layers=3 --cfg wd=1e-7 --suffix teacher
+python -u main.py --dataset=citeulike --backbone=simplex --train_teacher --teacher embedding_dim=400 --cfg wd=1e-5 num_ns=2000 -suffix teacher
 
 python -u main.py --dataset=gowalla --backbone=bpr --train_teacher --teacher embedding_dim=300 --cfg wd=1e-4 --suffix teacher
 python -u main.py --dataset=gowalla --backbone=lightgcn --train_teacher --teacher embedding_dim=2000 num_layers=4 --cfg wd=1e-6 --suffix teacher
