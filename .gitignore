@@ -11,3 +11,4 @@ search/log/
 search/yamls/
 analysis.ipynb
 mlruns/
+figs/
