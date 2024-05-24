@@ -3,12 +3,12 @@ teacher:
   keep_prob: 0.6
   A_split: False
   dropout: False
-  embedding_dim: 2000
-  num_layers: 4
+  embedding_dim: 1000
+  num_layers: 3
 student:
   init_std: 0.1
   keep_prob: 0.6
   A_split: False
   dropout: False
   embedding_dim: 20
-  num_layers: 4
+  num_layers: 3
