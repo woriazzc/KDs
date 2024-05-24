@@ -7,6 +7,6 @@ lmbda: 0.5
 cd_sample_num: 3000
 cd_strategy: "student guide"
 cd_T: 20.
-cd_n_distill: 2
+cd_n_distill: w
 cd_t1: 2.
 cd_t2: 0.

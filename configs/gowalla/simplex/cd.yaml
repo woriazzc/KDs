@@ -1,0 +1,13 @@
+epochs: 1000
+batch_size: 256
+lr: 1.e-4
+wd: 1.e-5
+num_ns: 2000
+neg_sampling_on_all: True
+
+cd_sample_num: 300
+cd_strategy: "student guide"
+cd_T: 20.
+cd_n_distill: 2
+cd_t1: 2.
+cd_t2: 0.

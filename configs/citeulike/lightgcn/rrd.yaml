@@ -4,6 +4,7 @@ lr: 1.e-3
 wd: 1.e-8
 lmbda: 0.5
 
-de_end_T: 1.e-10
-de_anneal_size: 1.e+10
-de_num_experts: 10
+rrd_K: 40
+rrd_L: 40
+rrd_T: 10
+rrd_mxK: 500

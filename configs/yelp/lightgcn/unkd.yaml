@@ -4,6 +4,6 @@ lr: 1.e-3
 wd: 1.e-8
 lmbda: 0.5
 
-de_end_T: 1.e-10
-de_anneal_size: 1.e+10
-de_num_experts: 10
+unkd_group_num: 4
+unkd_lamda: 0.
+unkd_n_distill: 30

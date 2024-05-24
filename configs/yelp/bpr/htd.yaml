@@ -1,0 +1,10 @@
+epochs: 1000
+batch_size: 2048
+lr: 1.e-3
+wd: 1.e-8
+lmbda: 0.5
+
+htd_alpha: 0.9
+htd_num_experts: 30
+htd_choice: second 
+htd_T: 0.1
