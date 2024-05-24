@@ -100,8 +100,8 @@ class BPR(BaseRec):
         return score_mat
     
     def get_ratings(self, batch_user):
-        users, items = self.get_all_embedding()
-        users = users[batch_user]
+        users = self.get_user_embedding(batch_user.cuda())
+        items = self.get_item_embedding(self.item_list)
         score_mat = torch.matmul(users, items.T)
         return score_mat
 
@@ -365,7 +365,12 @@ class SimpleX(BaseRec):
         return self.item_tower(batch_item)
 
     def get_all_embedding(self):
-        users = self.user_tower(self.user_list)
+        # To save CUDA memory
+        users = torch.zeros_like(self.user_emb.weight.data)
+        batch_size = self.args.batch_size
+        n_batch = math.ceil(self.num_users / batch_size)
+        for i in range(n_batch):
+            users[i * batch_size:(i + 1) * batch_size] = self.user_tower(self.user_list[i * batch_size:(i + 1) * batch_size])
         items = self.item_tower(self.item_list)
         return users, items
     
@@ -377,8 +382,8 @@ class SimpleX(BaseRec):
         return score_mat
     
     def get_ratings(self, batch_user):
-        users, items = self.get_all_embedding()
-        users = users[batch_user]
+        users = self.get_user_embedding(batch_user.cuda())
+        items = self.get_item_embedding(self.item_list)
         score_mat = torch.matmul(users, items.T)
         if self.enable_bias:
             score_mat += self.user_bias(batch_user.cuda()) + self.global_bias
