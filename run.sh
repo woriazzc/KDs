@@ -4,17 +4,15 @@ python -u main.py --dataset=foursquare --backbone=lightgcn --train_teacher --tea
 
 python -u main.py --dataset=citeulike --backbone=bpr --train_teacher --teacher embedding_dim=400 --cfg wd=1e-3 --suffix teacher
 python -u main.py --dataset=citeulike --backbone=lightgcn --train_teacher --teacher embedding_dim=2000 num_layers=3 --cfg wd=1e-7 --suffix teacher
-python -u main.py --dataset=citeulike --backbone=simplex --train_teacher --teacher embedding_dim=400 --cfg wd=1e-5 num_ns=2000 -suffix teacher
+python -u main.py --dataset=citeulike --backbone=simplex --train_teacher --teacher embedding_dim=500 --cfg wd=1e-5 num_ns=2000 --suffix teacher
 
 python -u main.py --dataset=gowalla --backbone=bpr --train_teacher --teacher embedding_dim=300 --cfg wd=1e-4 --suffix teacher
 python -u main.py --dataset=gowalla --backbone=lightgcn --train_teacher --teacher embedding_dim=2000 num_layers=4 --cfg wd=1e-6 --suffix teacher
-
-python -u main.py --dataset=music --backbone=bpr --train_teacher --suffix teacher
-
-python -u main.py --dataset=books --backbone=bpr --train_teacher --suffix teacher
+python -u main.py --dataset=gowalla --backbone=simplex --train_teacher --teacher embedding_dim=1000 --cfg wd=1e-8 num_ns=2000 --suffix teacher
 
 python -u main.py --dataset=yelp --backbone=bpr --train_teacher --suffix teacher --teacher embedding_dim=300 --cfg wd=1e-4 --suffix teacher
-python -u main.py --dataset=yelp --backbone=lightgcn --train_teacher --suffix teacher
+python -u main.py --dataset=yelp --backbone=lightgcn --train_teacher --teacher embedding_dim=1000 num_layers=3 --cfg wd=1e-7 --suffix teacher
+python -u main.py --dataset=yelp --backbone=simplex --train_teacher --teacher embedding_dim=500 --cfg wd=1e-8 num_ns=1000 --suffix teacher
 
 #from scratch
 python -u main.py --dataset=foursquare --backbone=bpr --model=scratch --student embedding_dim=10 --cfg wd=0.01 --suffix student
@@ -26,8 +24,11 @@ python -u main.py --dataset=citeulike --backbone=simplex --model=scratch --stude
 
 python -u main.py --dataset=gowalla --backbone=bpr --model=scratch --student embedding_dim=20 --cfg wd=1e-3 --suffix student
 python -u main.py --dataset=gowalla --backbone=lightgcn --model=scratch --student embedding_dim=20 num_layers=4 --cfg wd=1e-7 --suffix student
+python -u main.py --dataset=gowalla --backbone=simplex --model=scratch --student embedding_dim=20 --suffix student
 
 python -u main.py --dataset=yelp --backbone=bpr --model=scratch --student embedding_dim=20 --cfg wd=1e-3 --suffix student
+python -u main.py --dataset=yelp --backbone=lightgcn --model=scratch --student embedding_dim=20 num_layers=3 --cfg wd=1e-4 --suffix student
+python -u main.py --dataset=yelp --backbone=simplex --model=scratch --student embedding_dim=20 --suffix student
 
 # KD
 # For HetComp, you need to pre-save teacher checkpoints through:
@@ -55,3 +56,4 @@ python -u main.py --dataset=foursquare --backbone=lightgcn --model=nkd
 
 
 python -u main.py --dataset=gowalla --backbone=bpr --model=graphd
+python -u main.py --dataset=gowalla --backbone=lightgcn --model=graphd
