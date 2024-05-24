@@ -57,7 +57,7 @@ class RD(BaseKD):
         self.topk = args.rd_topk
         self.T = args.rd_T
         self.dynamic_sample_num = args.rd_dynamic_sample
-        self.start_epoch = args.rrd_start_epoch
+        self.start_epoch = args.rd_start_epoch
         
         self.rank_aware = False
         self.RANK = None
@@ -184,7 +184,8 @@ class CD(BaseKD):
 
     def get_rank_sample(self, MODEL):
         if MODEL is None:
-            return self.random_sample(self.num_users)
+            self.rank_samples =  self.random_sample(self.num_users)
+            return
         self.rank_samples = torch.zeros(self.num_users, self.n_distill)
         with torch.no_grad():
             scores = MODEL.get_all_ratings()
@@ -557,7 +558,7 @@ class HTD(BaseKD):
         return total_loss
     
     def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
-        batch_neg_item = batch_neg_item.reshape(batch_neg_item.shape[0], -1)
+        batch_neg_item = batch_neg_item.reshape(-1)
         ## Group Assignment
         GA_loss_user = self.get_GA_loss(batch_user.unique(), is_user=True)
         GA_loss_item = self.get_GA_loss(torch.cat([batch_pos_item, batch_neg_item], 0).unique(), is_user=False)
