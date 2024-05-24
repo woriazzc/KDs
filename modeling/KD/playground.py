@@ -284,9 +284,9 @@ class GraphD(BaseKD):
             self.Graph_u, self.Graph_i = None, None
         else:
             all_u, all_i = self.teacher.get_all_embedding()
-            nearestK_u, nearestK_i = self.get_nearest_K(all_u, all_i, self.K)
-            self.Graph_u = self.construct_knn_graph(nearestK_u)
-            self.Graph_i = self.construct_knn_graph(nearestK_i)
+            self.nearestK_u, self.nearestK_i = self.get_nearest_K(all_u, all_i, self.K)
+            self.Graph_u = self.construct_knn_graph(self.nearestK_u)
+            self.Graph_i = self.construct_knn_graph(self.nearestK_i)
     
     def get_params_to_update(self):
         return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
@@ -538,8 +538,9 @@ class FD(BaseKD):
         self.student_dim = self.student.embedding_dim
         self.teacher_dim = self.teacher.embedding_dim
 
-        self.S_user_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True, dropout_rate=self.dropout_rate)
-        self.S_item_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=True, dropout_rate=self.dropout_rate)
+        self.norm = False
+        self.S_user_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=False, dropout_rate=self.dropout_rate)
+        self.S_item_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=False, dropout_rate=self.dropout_rate)
 
         all_u, all_i = self.teacher.get_all_embedding()
         nearestK_u, nearestK_i = self.get_nearest_K(all_u, all_i, self.K)
@@ -603,6 +604,7 @@ class FD(BaseKD):
         return filter.cuda()
     
     def construct_anchor_filters(self, entity_type):
+        if self.num_anchors == 0: return []
         smooth_dim = self.num_users if entity_type == 'u' else self.num_items
         f_all_values = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_values_{entity_type}_{smooth_dim}.pkl")
         f_all_vectors = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_vectors_{entity_type}_{smooth_dim}.pkl")
@@ -614,17 +616,21 @@ class FD(BaseKD):
             vectors = all_vectors[:, blk * i:blk * (i + 1)]
             filter = vectors.mm(vectors.t())
             anchor_filters.append(filter.cuda())
+        # anchor_filters.append(self.filter_u if entity_type == 'u' else self.filter_i)
         return anchor_filters
     
     def weight_feature(self, value):
         ## exp
         # return torch.exp(self.beta * (value - value.max())).reshape(1, -1)
         ## linear
-        # return torch.clip(self.beta * (value - value.max()) + 1., 0.).reshape(1, -1)
+        return torch.clip(self.beta * (value - value.max()) + 1., 0.).reshape(1, -1)
         ## reverse linear
         # return torch.clip(1. - self.beta * (value - value.min()), 0.).reshape(1, -1)
         ## ideal low pass
-        return torch.cat([torch.ones_like(value[:len(value) // 4]), torch.zeros_like(value[len(value) // 4:])])
+        # return torch.cat([torch.ones_like(value[:len(value) // 4]) * 1.2, 
+        #                   torch.ones_like(value[len(value) // 4:len(value) // 2]), 
+        #                   torch.ones_like(value[len(value) // 2:len(value) // 4 * 3]) * 0.8,
+        #                   torch.ones_like(value[len(value) // 4 * 3:]) * 0.8])
     
     def _sym_normalize(self, Graph):
         dense = Graph.to_dense().cpu()
@@ -651,19 +657,23 @@ class FD(BaseKD):
             experts = self.S_item_experts
             Graph = self.filter_i
         
-        filtered_S = torch.sparse.mm(Graph, S)
+        SP = experts(S)
+        filtered_S = torch.sparse.mm(Graph, SP)
         filtered_T = torch.sparse.mm(Graph, T)
         filtered_T = filtered_T[batch_entity]
         filtered_S = filtered_S[batch_entity]
-        filtered_S = experts(filtered_S)
+        # filtered_S = experts(filtered_S)
+
+        if self.norm:
+            norm_T = T[batch_entity].pow(2).sum(-1, keepdim=True).pow(1. / 2)
+            filtered_T = filtered_T.div(norm_T)
+            norm_S = SP[batch_entity].pow(2).sum(-1, keepdim=True).pow(1. / 2)
+            filtered_S = filtered_S.div(norm_S)
 
         return filtered_S, filtered_T
     
     def cal_FD_loss(self, T_feas, S_feas):
-        norm_T = T_feas.pow(2).sum(-1, keepdim=True).pow(1. / 2)
-        T_feas = T_feas.div(norm_T)
-        cos_theta = (T_feas * S_feas).sum(-1, keepdim=True)
-        G_diff = 1. - cos_theta
+        G_diff = ((T_feas - S_feas) ** 2).sum(-1) / 2
         FD_loss = G_diff.sum()
         return FD_loss
     
@@ -679,16 +689,32 @@ class FD(BaseKD):
             S = self.student.item_emb.weight
             experts = self.S_item_experts
             anchor_filters = self.anchor_filters_i
+        
+        # experts.eval()
+        SP = experts(S)
+        # experts.train()
         for idx, filter in enumerate(anchor_filters):
-            filtered_S = torch.sparse.mm(filter, S)
+            filtered_S = torch.sparse.mm(filter, SP)
             filtered_T = torch.sparse.mm(filter, T)
             filtered_T = filtered_T[batch_entity]
             filtered_S = filtered_S[batch_entity]
-            experts.eval()
-            filtered_S = experts(filtered_S)
-            experts.train()
+            # experts.eval()
+            # filtered_S = experts(filtered_S)
+            # experts.train()
+            if self.norm:
+                norm_T = T[batch_entity].pow(2).sum(-1, keepdim=True).pow(1. / 2)
+                filtered_T = filtered_T.div(norm_T)
+                norm_S = SP[batch_entity].pow(2).sum(-1, keepdim=True).pow(1. / 2)
+                filtered_S = filtered_S.div(norm_S)
+
+                # norm_SP = SP[batch_entity].pow(2).sum(-1)
+                # rat_S = (norm_S.squeeze() / norm_SP).mean().cpu().item()
+                # mlflow.log_metric(f"norm_ASP/norm_SP_{idx}", rat_S, step=self.global_step)
+                # rat_T = (norm_T.squeeze() / T[batch_entity].pow(2).sum(-1)).mean().cpu().item()
+                # mlflow.log_metric(f"norm_AT/norm_T_{idx}", rat_T, step=self.global_step)
             loss = self.cal_FD_loss(filtered_T, filtered_S)
             mlflow.log_metrics({f"anchor_loss_{idx}": (loss / batch_entity.shape[0]).cpu().item()}, step=self.global_step)
+        # self.global_step += 1
 
     def get_DE_loss(self, batch_entity, is_user):
         filtered_S, filtered_T = self.get_features(batch_entity, is_user)
@@ -765,6 +791,8 @@ class GDCP(GraphD):
             self.topk_dict = self.get_topk_dict()
             ranking_list = torch.exp(-(torch.arange(self.mxK) + 1) / self.T)
             self.ranking_mat = ranking_list.repeat(self.num_users, 1)
+        elif self.reg_type == "third":
+            self.tau_ce = args.gdcp_tau_ce
         else:
             raise NotImplementedError
 
@@ -785,7 +813,10 @@ class GDCP(GraphD):
         return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
 
     def do_something_in_each_epoch(self, epoch):
-        self.w_reg = max(0., 1. - epoch / self.dec_epoch) * self.init_w_reg
+        if self.dec_epoch == 0:
+            self.w_reg = self.init_w_reg
+        else:
+            self.w_reg = max(0., 1. - epoch / self.dec_epoch) * self.init_w_reg
         
         if self.reg_type == "second":
             with torch.no_grad():
@@ -817,11 +848,11 @@ class GDCP(GraphD):
         T = torch.sparse.mm(droped_GraphT, T)
         T = T[batch_entity]
         S = S[batch_entity]
-        # if is_reg:
-        #     pre_S = S.detach().clone()
-        # else:
-        #     pre_S = S
-        pre_S = S
+        if is_reg:
+            pre_S = S.detach().clone()
+        else:
+            pre_S = S
+        # pre_S = S
         post_S = experts(pre_S)
         if is_reg:
             return pre_S, post_S
@@ -842,13 +873,22 @@ class GDCP(GraphD):
             pre_neg_score = torch.bmm(pre_neg_feas, pre_u_feas.unsqueeze(-1)).squeeze(-1)
             pre_pos_score = pre_pos_score.expand_as(pre_neg_score)
             reg = F.relu(-(post_pos_score - post_neg_score) * (pre_pos_score - pre_neg_score) - self.margin).mean(1).sum()
-        else:
+        elif self.reg_type == "second":
             topQ_items = self.interesting_items[batch_user].type(torch.LongTensor).cuda()
             post_u_feas, pre_u_feas = self.get_features(batch_user, is_user=True, is_reg=True)		# bs, S_dim
             post_i_feas, pre_i_feas = self.get_features(topQ_items, is_user=False, is_reg=True)		# bs, Q, S_dim
             post_topQ_logits = torch.bmm(post_i_feas, post_u_feas.unsqueeze(-1)).squeeze(-1)    # bs, Q
             pre_topQ_logits = torch.bmm(pre_i_feas, pre_u_feas.unsqueeze(-1)).squeeze(-1)    # bs, Q
             reg = self.ce_ranking_loss(post_topQ_logits, pre_topQ_logits)
+        elif self.reg_type == "third":
+            topQ_items = torch.cat([batch_pos_item.reshape(-1, 1), batch_neg_item, self.nearestK_u[batch_user]], dim=-1)
+            post_u_feas, pre_u_feas = self.get_features(batch_user, is_user=True, is_reg=True)		# bs, S_dim
+            post_i_feas, pre_i_feas = self.get_features(topQ_items, is_user=False, is_reg=True)		# bs, Q, S_dim
+            post_topQ_logits = torch.bmm(post_i_feas, post_u_feas.unsqueeze(-1)).squeeze(-1)    # bs, Q
+            pre_topQ_logits = torch.bmm(pre_i_feas, pre_u_feas.unsqueeze(-1)).squeeze(-1)    # bs, Q
+            reg = self.ce_ranking_loss(post_topQ_logits, pre_topQ_logits)
+        else:
+            raise NotImplementedError
         return reg
 
     def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
