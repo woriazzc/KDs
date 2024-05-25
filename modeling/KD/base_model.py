@@ -42,7 +42,7 @@ class BaseKD(nn.Module):
         self.student.eval()
     
     def get_params_to_update(self):
-        return [{"params": self.student.parameters(), 'lr': self.args.lr, 'weight_decay': self.args.wd}]
+        return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
 
     def forward(self, batch_user, batch_pos_item, batch_neg_item):
         output = self.student(batch_user, batch_pos_item, batch_neg_item)
