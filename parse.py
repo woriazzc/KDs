@@ -18,6 +18,7 @@ parser.add_argument('--gpu_id', type=int, default=0)
 parser.add_argument('--no_log', action='store_true')
 parser.add_argument('--no_save', action='store_true')
 parser.add_argument('--suffix', type=str, default='')
+parser.add_argument('--verbose', action='store_true', help="For mlflow")
 
 parser.add_argument('--dataset', type=str, default='gowalla')
 parser.add_argument('--batch_size', type=int, default=4096)
