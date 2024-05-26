@@ -33,9 +33,10 @@ python -u main.py --dataset=yelp --backbone=simplex --model=scratch --student em
 # KD
 # For HetComp, you need to pre-save teacher checkpoints through:
 python -u main.py --dataset=citeulike --backbone=bpr --train_teacher --teacher embedding_dim=400 --cfg wd=1e-3 --no_log --ckpt_interval=50
-python -u main.py --dataset=citeulike --backbone=bpr --model=hetcomp --run_all
-python -u main.py --dataset=citeulike --backbone=bpr --model=de --run_all
+python -u main.py --dataset=citeulike --backbone=bpr --model=hetcomp
+python -u main.py --dataset=citeulike --backbone=bpr --model=de --cfg wd=1e-4 lmbda=0.05 de_num_experts=30
 
+python -u main.py --dataset=citeulike --backbone=bpr --model=cpd
 python -u main.py --dataset=citeulike --backbone=bpr --model=nkd
 python -u main.py --dataset=citeulike --backbone=bpr --model=graphd
 python -u main.py --dataset=citeulike --backbone=bpr --model=filterd
