@@ -19,6 +19,7 @@ parser.add_argument('--no_log', action='store_true')
 parser.add_argument('--no_save', action='store_true')
 parser.add_argument('--suffix', type=str, default='')
 parser.add_argument('--verbose', action='store_true', help="For mlflow")
+parser.add_argument('--ablation', action='store_true', help="perform ablation")
 
 parser.add_argument('--dataset', type=str, default='gowalla')
 parser.add_argument('--batch_size', type=int, default=4096)
