@@ -368,10 +368,13 @@ class RRD(BaseKD):
             self.uninteresting_items = torch.cat([tmp1, tmp2], 0)
     
     def relaxed_ranking_loss(self, S1, S2):
+        
+        S1 = torch.minimum(S1, torch.tensor(80., device=S1.device))     # This may help
+        S2 = torch.minimum(S2, torch.tensor(80., device=S2.device))
 
         above = S1.sum(1, keepdims=True)
 
-        below1 = S1.flip(-1).exp().cumsum(1)
+        below1 = S1.flip(-1).exp().cumsum(1)    # exp() of interesting_prediction results in inf
         below2 = S2.exp().sum(1, keepdims=True)
 
         below = (below1 + below2).log().sum(1, keepdims=True)
