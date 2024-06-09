@@ -45,6 +45,8 @@ python -u main.py --dataset=citeulike --backbone=bpr --model=gdcp
 
 python -u main.py --dataset=citeulike --backbone=lightgcn --model=graphd --cfg ablation=True --suffix ablation
 python -u main.py --dataset=citeulike --backbone=lightgcn --model=graphd
+python -u main.py --dataset=citeulike --backbone=lightgcn --model=de
+python -u main.py --dataset=citeulike --backbone=lightgcn --model=cpd
 
 
 python -u main.py --dataset=foursquare --backbone=bpr --model=de
@@ -56,5 +58,13 @@ python -u main.py --dataset=foursquare --backbone=bpr --model=filterd
 python -u main.py --dataset=foursquare --backbone=lightgcn --model=nkd
 
 
+python -u main.py --dataset=gowalla --backbone=bpr --model=de
+python -u main.py --dataset=gowalla --backbone=bpr --model=rrd
+python -u main.py --dataset=gowalla --backbone=bpr --model=cpd
 python -u main.py --dataset=gowalla --backbone=bpr --model=graphd
+
 python -u main.py --dataset=gowalla --backbone=lightgcn --model=graphd
+
+
+python -u main.py --dataset=yelp --backbone=bpr --model=de
+python -u main.py --dataset=yelp --backbone=bpr --model=rrd
