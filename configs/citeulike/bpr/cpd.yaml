@@ -13,7 +13,7 @@ cpd_sample_type: rank  # uniform, batch, rank
 cpd_reg_type: list  # pair, list
 cpd_guide_type: teacher   # student, teacher
 
-# For cpd_sample_type in ["rank", "uniform"]
+# For cpd_sample_type == "rank"
 cpd_T: 10
 cpd_mxK: 100
 
