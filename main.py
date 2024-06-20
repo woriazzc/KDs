@@ -32,8 +32,8 @@ def main(args):
         Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(trainset, all_teacher_args).cuda()
         Student = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(trainset, all_student_args).cuda()
     else:
-        logger.log('Invalid backbone model.')
-        raise(NotImplementedError, 'Invalid backbone model.')
+        logger.log(f'Invalid backbone {args.backbone}.')
+        raise(NotImplementedError, f'Invalid backbone {args.backbone}.')
 
     if args.model.lower() == "scratch":
         if args.train_teacher:
@@ -47,8 +47,8 @@ def main(args):
         if args.model.lower() in all_models:
             model = getattr(KD, dir(KD)[all_models.index(args.model.lower())])(args, Teacher, Student).cuda()
         else:
-            logger.log('Invalid backbone model.')
-            raise(NotImplementedError, 'Invalid backbone model.')
+            logger.log(f'Invalid model {args.model}.')
+            raise(NotImplementedError, f'Invalid model {args.model}.')
 
     # Optimizer
     optimizer = optim.Adam(model.get_params_to_update())
