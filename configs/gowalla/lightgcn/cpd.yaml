@@ -1,0 +1,22 @@
+epochs: 1000
+batch_size: 4096
+lr: 1.e-3
+wd: 1.e-6
+lmbda: 0.005
+
+de_end_T: 1.e-10
+de_anneal_size: 1.e+10
+de_num_experts: 5
+
+cpd_alpha: 0.5
+cpd_sample_type: rank  # uniform, batch, rank
+cpd_reg_type: list  # pair, list
+cpd_guide_type: teacher   # student, teacher
+
+# For cpd_sample_type in ["rank", "uniform"]
+cpd_T: 10
+cpd_mxK: 100
+
+# For cpd_reg_type == "list"
+cpd_Q: 5
+cpd_tau_ce: 0.1
