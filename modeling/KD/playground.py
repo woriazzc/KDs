@@ -3,6 +3,7 @@ import math
 import mlflow
 import random
 import numpy as np
+from sklearn.metrics import ndcg_score
 
 from torch_cluster import knn
 import torch
@@ -18,61 +19,92 @@ class CPD(DE):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
 
+        self.step = 0
+
         self.alpha = args.cpd_alpha
+        self.sample_type = args.cpd_sample_type
         self.reg_type = args.cpd_reg_type
+        self.guide_type = args.cpd_guide_type
+        self.Q = args.cpd_Q
 
-        if self.reg_type == "second":
-            # For interesting item
-            self.K = args.cpd_K
-            self.T = args.cpd_T
-            self.mxK = args.cpd_mxK
+        if self.args.ablation:
+            self.sample_type = "none"
+            self.reg_type = "none"
+        
+        if self.reg_type == "list":
             self.tau_ce = args.cpd_tau_ce
-
-            self.get_topk_dict()
+        
+        if self.sample_type == "rank":
+            # For interesting item
+            self.T = args.cpd_T
+            self.mxK = min(args.cpd_mxK, self.num_items)
             ranking_list = torch.exp(-(torch.arange(self.mxK) + 1) / self.T)
             self.ranking_mat = ranking_list.repeat(self.num_users, 1)
+            if self.guide_type == "teacher":
+                self.topk_dict = self.get_topk_dict(self.teacher)
 
-    def get_topk_dict(self):
+    def get_topk_dict(self, model):
         print('Generating Top-K dict...')
         with torch.no_grad():
-            inter_mat = self.teacher.get_all_ratings()
-            train_pairs = self.dataset.train_pairs
-            # remove true interactions from topk_dict
-            inter_mat[train_pairs[:, 0], train_pairs[:, 1]] = -1e6
-            _, self.topk_dict = torch.topk(inter_mat, self.mxK, dim=-1)
+            inter_mat = model.get_all_ratings()
+            # TODO: delete it ??
+            # train_pairs = self.dataset.train_pairs
+            # inter_mat[train_pairs[:, 0], train_pairs[:, 1]] = -1e6
+            _, topk_dict = torch.topk(inter_mat, self.mxK, dim=-1)
+        return topk_dict.type(torch.LongTensor)
     
-    def ce_ranking_loss(self, S, T):
+    def ce_loss(self, S, T):
         T_probs = torch.softmax(T / self.tau_ce, dim=-1)
         return F.cross_entropy(S / self.tau_ce, T_probs, reduction='sum')
 
-    def get_params_to_update(self):
-        return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
+    def ranking_loss(self, S, T):
+        _, idx_col = torch.sort(T, descending=True)
+        idx_row = torch.arange(T.size(0)).unsqueeze(1).cuda()
+        S = S[idx_row, idx_col]
+        above = S.sum(1, keepdims=True)
+        below = S.flip(-1).exp().cumsum(1)
+        below = below.log().sum(1, keepdims=True)
+        loss = -(above - below)
+        margin = (torch.arange(self.Q) + 1).log().sum().cuda()
+        loss[loss < margin] = 0.
+        return loss.sum()
+    
+    def ranking_loss2(self, S, T):
+        _, idx_col = torch.sort(T, descending=True)
+        idx_row = torch.arange(S.size(0)).cuda().reshape(-1, 1, 1)
+        idx_dim2 = torch.arange(S.size(1)).cuda().reshape(1, -1, 1)
+        S = S[idx_row, idx_dim2, idx_col]
+        above = S.sum(-1, keepdims=True)
+        below = S.flip(-1).exp().cumsum(-1)
+        below = below.log().sum(-1, keepdims=True)
+        loss = -(above - below)
+        margin = (torch.arange(S.shape[-1]) + 1).log().sum().cuda()
+        loss[loss < margin] = 0.
+        return loss.mean(1).sum()
 
     def do_something_in_each_epoch(self, epoch):
-        if self.reg_type == "first":
-            self.current_T = self.end_T * self.anneal_size * ((1. / self.anneal_size) ** (epoch / self.max_epoch))
-            self.current_T = max(self.current_T, self.end_T)
-        elif self.reg_type == "second":
-            with torch.no_grad():
-                # interesting items
-                self.interesting_items = torch.zeros((self.num_users, self.K))
+        self.current_T = self.end_T * self.anneal_size * ((1. / self.anneal_size) ** (epoch / self.max_epoch))
+        self.current_T = max(self.current_T, self.end_T)
 
-                # sampling
-                while True:
-                    samples = torch.multinomial(self.ranking_mat, self.K, replacement=False)
-                    if (samples > self.mxK).sum() == 0:
-                        break
-
-                samples = samples.sort(dim=1)[0]
-
+        if self.args.ablation:
+            return
+        
+        with torch.no_grad():
+            if self.sample_type == "rank":
+                if self.guide_type == "student":
+                    self.topk_dict = self.get_topk_dict(self.student)
+                self.sampled_items = torch.zeros((self.num_users, self.Q), dtype=torch.long)
+                samples = torch.multinomial(self.ranking_mat, self.Q, replacement=False)
                 for user in range(self.num_users):
-                    self.interesting_items[user] = self.topk_dict[user][samples[user]]
-
-                self.interesting_items = self.interesting_items.cuda()
-        else:
-            raise NotImplementedError
+                    self.sampled_items[user] = self.topk_dict[user][samples[user]]
+                self.sampled_items = self.sampled_items.cuda()
+            elif self.sample_type == "uniform":
+                self.sampled_items = torch.from_numpy(np.random.choice(self.num_items, size=(self.num_users, self.Q), replace=True)).cuda()
 
     def get_features(self, batch_entity, is_user, is_teacher, detach=False):
+        size = batch_entity.size()
+        batch_entity = batch_entity.reshape(-1)
+        
         if is_user:
             s = self.student.get_user_embedding(batch_entity)
             t = self.teacher.get_user_embedding(batch_entity)
@@ -87,7 +119,7 @@ class CPD(DE):
             selection_net = self.item_selection_net
         
         if is_teacher:
-            return t
+            return t.reshape(*size, -1)
         
         selection_dist = selection_net(t) 			# batch_size x num_experts
 
@@ -111,7 +143,7 @@ class CPD(DE):
 
         expert_outputs = expert_outputs * selection_result						# batch_size x teacher_dims x num_experts
         expert_outputs = expert_outputs.sum(2)
-        return expert_outputs
+        return expert_outputs.reshape(*size, -1)
 
     def get_DE_loss(self, batch_entity, is_user):
         T_feas = self.get_features(batch_entity, is_user=is_user, is_teacher=True)
@@ -121,42 +153,106 @@ class CPD(DE):
         return DE_loss
 
     def get_reg(self, batch_user, batch_pos_item, batch_neg_item):
-        if self.reg_type == "first":
-            neg_size = batch_neg_item.size()
-            batch_neg_item = batch_neg_item.reshape(-1)
-            post_u_feas = self.get_features(batch_user, is_user=True, is_teacher=False, detach=True).squeeze(1)
-            post_pos_feas = self.get_features(batch_pos_item, is_user=False, is_teacher=False, detach=True).squeeze(1)
-            post_neg_feas = self.get_features(batch_neg_item, is_user=False, is_teacher=False, detach=True).squeeze(1)
-            post_neg_feas = post_neg_feas.reshape(*neg_size, -1)
-            post_pos_score = (post_u_feas * post_pos_feas).sum(-1).unsqueeze(-1)  # bs, 1
-            post_neg_score = torch.bmm(post_neg_feas, post_u_feas.unsqueeze(-1)).squeeze(-1)    # bs, num_ns
-            batch_neg_item = batch_neg_item.reshape(*neg_size)
-            pre_u_feas = self.student.get_user_embedding(batch_user).detach()
-            pre_pos_feas = self.student.get_item_embedding(batch_pos_item).detach()
-            pre_neg_feas = self.student.get_item_embedding(batch_neg_item).detach()
-            pre_pos_score = (pre_u_feas * pre_pos_feas).sum(-1).unsqueeze(-1)
-            pre_neg_score = torch.bmm(pre_neg_feas, pre_u_feas.unsqueeze(-1)).squeeze(-1)
-            reg = F.relu(-(post_pos_score - post_neg_score) * (pre_pos_score - pre_neg_score)).mean(-1).sum()
-        elif self.reg_type == "second":
-            topQ_items = self.interesting_items[batch_user].type(torch.LongTensor).cuda()
-            batch_user_Q = batch_user.unsqueeze(-1)
-            batch_user_Q = torch.cat(self.K * [batch_user_Q], 1)
-            post_u = self.get_features(batch_user_Q, is_user=True, is_teacher=False, detach=True).squeeze()		# bs, Q, T_dim
-            post_i = self.get_features(topQ_items, is_user=False, is_teacher=False, detach=True).squeeze()		# bs, Q, T_dim
-            post_topQ_logits = (post_u * post_i).sum(dim=-1)         # bs, Q
-            pre_topQ_logits = self.student.forward_multi_items(batch_user, topQ_items).detach()    # bs, Q
-            reg = self.ce_ranking_loss(post_topQ_logits, pre_topQ_logits)
+        if self.reg_type == "pair":
+            if self.sample_type == "batch":
+                post_u_feas = self.get_features(batch_user, is_user=True, is_teacher=False, detach=True)
+                post_pos_feas = self.get_features(batch_pos_item, is_user=False, is_teacher=False, detach=True)
+                post_neg_feas = self.get_features(batch_neg_item, is_user=False, is_teacher=False, detach=True)
+                post_score_1 = (post_u_feas * post_pos_feas).sum(-1).unsqueeze(-1)  # bs, 1
+                post_score_2 = torch.bmm(post_neg_feas, post_u_feas.unsqueeze(-1)).squeeze(-1)    # bs, num_ns
+
+                pre_u_feas = self.student.get_user_embedding(batch_user).detach()
+                pre_pos_feas = self.student.get_item_embedding(batch_pos_item).detach()
+                pre_neg_feas = self.student.get_item_embedding(batch_neg_item).detach()
+                pre_score_1 = (pre_u_feas * pre_pos_feas).sum(-1).unsqueeze(-1)
+                pre_score_2 = torch.bmm(pre_neg_feas, pre_u_feas.unsqueeze(-1)).squeeze(-1)
+                # reg = F.relu(-(post_score_1 - post_score_2) * (pre_score_1 - pre_score_2)).mean(-1).sum()
+                reg = -F.logsigmoid((post_score_1 - post_score_2) * (pre_score_1 - pre_score_2)).mean(-1).sum()
+            elif self.sample_type in ["uniform", "rank"]:
+                batch_item_1, batch_item_2 = self.sampled_items[batch_user, 0], self.sampled_items[batch_user, 1]
+                post_u_feas = self.get_features(batch_user, is_user=True, is_teacher=False, detach=True)
+                post_feas_1 = self.get_features(batch_item_1, is_user=False, is_teacher=False, detach=True)
+                post_feas_2 = self.get_features(batch_item_2, is_user=False, is_teacher=False, detach=True)
+                post_score_1 = (post_u_feas * post_feas_1).sum(-1)  # bs
+                post_score_2 = (post_u_feas * post_feas_2).sum(-1)  # bs
+
+                pre_u_feas = self.student.get_user_embedding(batch_user).detach()
+                pre_feas_1 = self.student.get_item_embedding(batch_item_1).detach()
+                pre_feas_2 = self.student.get_item_embedding(batch_item_2).detach()
+                pre_score_1 = (pre_u_feas * pre_feas_1).sum(-1)   # bs
+                pre_score_2 = (pre_u_feas * pre_feas_2).sum(-1)   # bs
+                # reg = F.relu(-(post_score_1 - post_score_2) * (pre_score_1 - pre_score_2)).sum()
+                reg = -F.logsigmoid((post_score_1 - post_score_2) * (pre_score_1 - pre_score_2)).sum()
+            
+            else: raise NotImplementedError
+
+        elif self.reg_type == "list":
+            Q_items = self.sampled_items[batch_user].type(torch.LongTensor).cuda()
+            post_u_feas = self.get_features(batch_user, is_user=True, is_teacher=False, detach=True)     # bs, S_dim
+            post_i_feas = self.get_features(Q_items, is_user=False, is_teacher=False, detach=True)    # bs, Q, S_dim
+            post_Q_logits = torch.bmm(post_i_feas, post_u_feas.unsqueeze(-1)).squeeze(-1)    # bs, Q
+            
+            pre_u_feas = self.student.get_user_embedding(batch_user).detach()   # bs, S_dim
+            pre_i_feas = self.student.get_item_embedding(Q_items).detach()   # bs, Q, S_dim
+            pre_Q_logits = torch.bmm(pre_i_feas, pre_u_feas.unsqueeze(-1)).squeeze(-1)    # bs, Q
+            reg = self.ce_loss(post_Q_logits, pre_Q_logits)
         else:
             raise NotImplementedError
         return reg
 
+    @torch.no_grad()
+    def log_incon(self, batch_user):
+        sampled_items = torch.from_numpy(np.random.choice(self.num_items, size=(batch_user.size(0), 2), replace=True)).cuda()
+        batch_item_1, batch_item_2 = sampled_items[:, 0], sampled_items[:, 1]
+        post_u_feas = self.get_features(batch_user, is_user=True, is_teacher=False, detach=True)
+        post_feas_1 = self.get_features(batch_item_1, is_user=False, is_teacher=False, detach=True)
+        post_feas_2 = self.get_features(batch_item_2, is_user=False, is_teacher=False, detach=True)
+        post_score_1 = (post_u_feas * post_feas_1).sum(-1)  # bs
+        post_score_2 = (post_u_feas * post_feas_2).sum(-1)  # bs
+
+        pre_u_feas = self.student.get_user_embedding(batch_user).detach()
+        pre_feas_1 = self.student.get_item_embedding(batch_item_1).detach()
+        pre_feas_2 = self.student.get_item_embedding(batch_item_2).detach()
+        pre_score_1 = (pre_u_feas * pre_feas_1).sum(-1)   # bs
+        pre_score_2 = (pre_u_feas * pre_feas_2).sum(-1)   # bs
+        incon = ((post_score_1 - post_score_2) * (pre_score_1 - pre_score_2) < 0).float().mean()
+        mlflow.log_metric("incon", incon.detach().cpu().item(), self.step)
+        self.step += 1
+
+    @torch.no_grad()
+    def log_group_incon(self, batch_user):
+        G = 5
+        top_items = self.topk_dict.cuda()[batch_user]
+        bs = top_items.size(1) // G
+        for i in range(G):
+            for j in range(i, G):
+                batch_item_1 = top_items[torch.arange(batch_user.size(0)).cuda(), torch.randint(bs * i, bs * (i + 1), (batch_user.size(0),)).cuda()]
+                batch_item_2 = top_items[torch.arange(batch_user.size(0)).cuda(), torch.randint(bs * j, bs * (j + 1), (batch_user.size(0),)).cuda()]
+                post_u_feas = self.get_features(batch_user, is_user=True, is_teacher=False, detach=True)
+                post_feas_1 = self.get_features(batch_item_1, is_user=False, is_teacher=False, detach=True)
+                post_feas_2 = self.get_features(batch_item_2, is_user=False, is_teacher=False, detach=True)
+                post_score_1 = (post_u_feas * post_feas_1).sum(-1)  # bs
+                post_score_2 = (post_u_feas * post_feas_2).sum(-1)  # bs
+
+                pre_u_feas = self.student.get_user_embedding(batch_user).detach()
+                pre_feas_1 = self.student.get_item_embedding(batch_item_1).detach()
+                pre_feas_2 = self.student.get_item_embedding(batch_item_2).detach()
+                pre_score_1 = (pre_u_feas * pre_feas_1).sum(-1)   # bs
+                pre_score_2 = (pre_u_feas * pre_feas_2).sum(-1)   # bs
+                incon = ((post_score_1 - post_score_2) * (pre_score_1 - pre_score_2) < 0).float().mean()
+                mlflow.log_metric(f"incon_{i}_{j}", incon.detach().cpu().item(), self.step)
+        self.step += 1
+    
     def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
         DE_loss_user = self.get_DE_loss(batch_user.unique(), is_user=True)
         DE_loss_pos = self.get_DE_loss(batch_pos_item.unique(), is_user=False)
         DE_loss_neg = self.get_DE_loss(batch_neg_item.unique(), is_user=False)
         DE_loss = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
+        if self.args.ablation: reg = 0.
+        else: reg = self.get_reg(batch_user, batch_pos_item, batch_neg_item)
 
-        reg = self.get_reg(batch_user, batch_pos_item, batch_neg_item)
+        if self.args.verbose:
+            self.log_group_incon(batch_user)
 
         loss = DE_loss + self.alpha * reg
         return loss
