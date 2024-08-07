@@ -1,3 +1,6 @@
+"""
+For Recommendation Models
+"""
 # train teacher
 python -u main.py --dataset=foursquare --backbone=bpr --train_teacher --teacher embedding_dim=800 --cfg wd=0.01 --suffix teacher
 python -u main.py --dataset=foursquare --backbone=lightgcn --train_teacher --teacher embedding_dim=2000 num_layers=1 --cfg wd=1e-3 --suffix teacher
@@ -70,3 +73,11 @@ python -u main.py --dataset=gowalla --backbone=lightgcn --model=graphd
 python -u main.py --dataset=yelp --backbone=bpr --model=de
 python -u main.py --dataset=yelp --backbone=bpr --model=cpd
 python -u main.py --dataset=yelp --backbone=bpr --model=rrd
+
+
+
+"""
+For CTR Prediction Models
+"""
+# train teacher
+python -u main_ctr.py --dataset=criteo --backbone=deepfm --train_teacher --cfg wd=0.01 --suffix teacher

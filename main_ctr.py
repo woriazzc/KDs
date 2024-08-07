@@ -1,7 +1,5 @@
 import os
 import time
-import mlflow
-import pickle
 import numpy as np
 from copy import deepcopy
 
@@ -10,7 +8,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from parse import *
-from dataset import load_cf_data, implicit_CF_dataset, implicit_CF_dataset_test
+from dataset import CTRDataset
 from evaluation import Evaluator
 import modeling.backbone as backbone
 import modeling.KD as KD
@@ -18,11 +16,14 @@ from utils import seed_all, avg_dict, Logger
 
 def main(args):
     # Dataset
-    num_users, num_items, train_pairs, valid_pairs, test_pairs, train_dict, valid_dict, test_dict, train_matrix, user_pop, item_pop = load_cf_data(args.dataset)
-    trainset = implicit_CF_dataset(args.dataset, num_users, num_items, train_pairs, train_matrix, train_dict, user_pop, item_pop, args.num_ns, args.neg_sampling_on_all)
-    validset = implicit_CF_dataset_test(num_users, num_items, valid_dict)
-    testset = implicit_CF_dataset_test(num_users, num_items, test_dict)
+    trainset = CTRDataset(args.dataset, 'train')
+    validset = CTRDataset(args.dataset, 'valid')
+    testset = CTRDataset(args.dataset, 'test')
     train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True)
+    valid_loader = DataLoader(validset, batch_size=args.batch_size, shuffle=False)
+    test_loader = DataLoader(testset, batch_size=args.batch_size, shuffle=False)
+    args.field_dims = trainset.field_dims
+    args.early_stop_metric = "AUC"
 
     # Backbone
     all_backbones = [e.lower() for e in dir(backbone)]
@@ -30,8 +31,8 @@ def main(args):
         all_teacher_args, all_student_args = deepcopy(args), deepcopy(args)
         all_teacher_args.__dict__.update(teacher_args.__dict__)
         all_student_args.__dict__.update(student_args.__dict__)
-        Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(trainset, all_teacher_args).cuda()
-        Student = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(trainset, all_student_args).cuda()
+        Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(all_teacher_args).cuda()
+        Student = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(all_student_args).cuda()
     else:
         logger.log(f'Invalid backbone {args.backbone}.')
         raise(NotImplementedError, f'Invalid backbone {args.backbone}.')
@@ -64,15 +65,14 @@ def main(args):
         logger.log('-' * 40 + "Teacher" + '-' * 40, pre=False)
         tmp_evaluator = Evaluator(args)
         tmp_model = KD.Scratch(args, Teacher).cuda()
-        is_improved, early_stop, eval_results, elapsed = tmp_evaluator.evaluate_while_training(tmp_model, -1, train_loader, validset, testset)
+
+        is_improved, early_stop, eval_results, elapsed = tmp_evaluator.evaluate_while_training(tmp_model, -1, train_loader, valid_loader, test_loader)
         Evaluator.print_final_result(logger, tmp_evaluator.eval_dict)
         logger.log('-' * 88, pre=False)
 
     for epoch in range(args.epochs):
         logger.log(f'Epoch [{epoch + 1}/{args.epochs}]')
         tic1 = time.time()
-        logger.log('Negative sampling...')
-        train_loader.dataset.negative_sampling()
 
         logger.log("Model's personal time...")
         model.do_something_in_each_epoch(epoch)
@@ -80,14 +80,13 @@ def main(args):
         epoch_loss = []
         logger.log('Training...')
         
-        for idx, (batch_user, batch_pos_item, batch_neg_item) in enumerate(train_loader):
-            batch_user = batch_user.cuda()      # batch_size
-            batch_pos_item = batch_pos_item.cuda()  # batch_size
-            batch_neg_item = batch_neg_item.cuda()  # batch_size, num_ns
+        for idx, (features, labels) in enumerate(train_loader):
+            features = features.cuda()      # batch_size, F
+            labels = labels.cuda()  # batch_size
             
             # Forward Pass
             model.train()
-            loss = model(batch_user, batch_pos_item, batch_neg_item)
+            loss = model(features, labels)
 
             # Backward and optimize
             optimizer.zero_grad()
@@ -102,7 +101,7 @@ def main(args):
         # evaluation
         if epoch % args.eval_period == 0:
             logger.log("Evaluating...")
-            is_improved, early_stop, eval_results, elapsed = evaluator.evaluate_while_training(model, epoch, train_loader, validset, testset)
+            is_improved, early_stop, eval_results, elapsed = evaluator.evaluate_while_training(model, epoch, train_loader, valid_loader, test_loader)
             evaluator.print_result_while_training(logger, epoch_loss, eval_results, is_improved=is_improved, train_time=toc1-tic1, test_time=elapsed)
             if early_stop:
                 break
@@ -132,6 +131,7 @@ def main(args):
 if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
     logger = Logger(args, args.no_log)
+    args.task = 'ctr'
 
     if args.run_all:
         args_copy = deepcopy(args)

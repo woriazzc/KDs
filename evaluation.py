@@ -1,6 +1,7 @@
 from copy import deepcopy
 import time
 import numpy as np
+from sklearn.metrics import log_loss, roc_auc_score
 
 import torch
 import torch.utils.data as data
@@ -8,21 +9,29 @@ import torch.utils.data as data
 from utils import to_np
 from utils.metric import Precision, Recall, NDCG, get_labels
 
-METRIC2FUNC = {'Recall': Recall, 'NDCG': NDCG, 'Precision': Precision}
+
+METRIC2FUNC = {'Recall': Recall, 'NDCG': NDCG, 'Precision': Precision, 'AUC': roc_auc_score, 'LogLoss': log_loss}
 
 class Evaluator:
     def __init__(self, args):
-        self.K_list = args.K_list
-        self.K_max = max(self.K_list)
         self.early_stop_patience = args.early_stop_patience
         self.early_stop_metric = args.early_stop_metric
-        self.early_top_K = args.early_stop_K
-        self.metrics = ['Recall', 'NDCG']
-        
-        self.METRICS_DICT = {metric: {K: 0. for K in self.K_list} for metric in self.metrics}
-        self.eval_dict = self.get_eval_template()
+        self.task = args.task
+        if self.task == 'rec':
+            self.K_list = args.K_list
+            self.K_max = max(self.K_list)
+            self.early_top_K = args.early_stop_K
+            self.metrics = ['Recall', 'NDCG']
+            self.METRICS_DICT = {metric: {K: -1. for K in self.K_list} for metric in self.metrics}
+        elif self.task == 'ctr':
+            self.metrics = ['AUC', 'LogLoss']
+            self.METRICS_DICT = {metric: -1. for metric in self.metrics}
+            self.METRICS_DICT['LogLoss'] = 1e10
+        else:
+            raise NotImplementedError
+        self.eval_dict = self.get_eval_template(self.METRICS_DICT)
 
-    def get_eval_template(self):
+    def get_eval_template(self, metric_dict):
         """
         {
             'early_stop': 0, 'early_stop_max': 0, 'final_epoch': 0,
@@ -38,14 +47,10 @@ class Evaluator:
         """
         eval_dict = {'early_stop': 0,  'early_stop_max': self.early_stop_patience, 'final_epoch': 0}
         for mode in ['best_result', 'final_result']:
-            eval_dict[mode] = {}
-            for metric in self.metrics:
-                eval_dict[mode][metric] = {}
-                for K in self.K_list:
-                    eval_dict[mode][metric][K] = -1.
+            eval_dict[mode] = deepcopy(metric_dict)
         return eval_dict
 
-    def evaluate(self, model, train_loader, test_dataset):
+    def evaluate_rec(self, model, train_loader, valid_dataset, test_dataset):
         """
         {
             'valid': {
@@ -61,8 +66,8 @@ class Evaluator:
         eval_results = {'test': deepcopy(self.METRICS_DICT), 'valid':deepcopy(self.METRICS_DICT)}
         
         train_dict = train_loader.dataset.train_dict
-        valid_dict = test_dataset.valid_dict
-        test_dict = test_dataset.test_dict
+        valid_dict = valid_dataset.inter_dict
+        test_dict = test_dataset.inter_dict
         num_users = train_loader.dataset.num_users
         num_items = train_loader.dataset.num_items
 
@@ -96,28 +101,75 @@ class Evaluator:
 
         return eval_results
 
+    def evaluate_ctr(self, model, valid_loader, test_loader):
+        """
+        {
+            'valid': {
+                        'AUC': -1., 
+                        'LogLoss': 1e10
+                    },
+            'test': {
+                        'AUC': -1., 
+                        'LogLoss': 1e10
+                    }
+        }
+        """
+        eval_results = {'test': deepcopy(self.METRICS_DICT), 'valid':deepcopy(self.METRICS_DICT)}
+        
+        model.eval()        
+        for mode in ['valid', 'test']:
+            if mode == 'valid':
+                loader = valid_loader
+            else:
+                loader = test_loader
+            labels, predicts = list(), list()
+            for features, label in loader:
+                features = features.cuda()      # batch_size, F
+                label = label.cuda()  # batch_size
+                logits = model.get_ratings(features)
+                y = torch.sigmoid(logits)
+                labels.extend(label.tolist())
+                predicts.extend(y.tolist())
+            
+            for metric in self.metrics:
+                func = METRIC2FUNC[metric]
+                eval_results[mode][metric] = func(labels, predicts)
 
-    def evaluate_while_training(self, model, epoch, train_loader, test_dataset):
+        return eval_results
+
+    def evaluate_while_training(self, model, epoch, train, valid, test):
         model.eval()
         with torch.no_grad():
             tic = time.time()
-            eval_results = self.evaluate(model, train_loader, test_dataset)
+            if self.task == 'rec':
+                eval_results = self.evaluate_rec(model, train, valid, test)
+            elif self.task == 'ctr':
+                eval_results = self.evaluate_ctr(model, valid, test)
+            else: raise NotImplementedError
+
             toc = time.time()
             metric = self.early_stop_metric
-            K = self.early_top_K
             is_improved = False
 
             if self.eval_dict['early_stop'] < self.eval_dict['early_stop_max']:
-                if self.eval_dict['best_result'][metric][K] < eval_results['valid'][metric][K]:
-                    self.eval_dict['best_result'] = eval_results['valid']
-                    self.eval_dict['final_result'] = eval_results['test']
-                    is_improved = True
-                    self.eval_dict['final_epoch'] = epoch
-
-            if not is_improved:
-                self.eval_dict['early_stop'] += 1
-            else:
+                if self.task == 'rec':
+                    K = self.early_top_K
+                    best_performance = self.eval_dict['best_result'][metric][K]
+                    cur_performance = eval_results['valid'][metric][K]
+                elif self.task == 'ctr':
+                    best_performance = self.eval_dict['best_result'][metric]
+                    cur_performance = eval_results['valid'][metric]
+                else:
+                    raise NotImplementedError
+    
+            if best_performance < cur_performance or (best_performance > cur_performance and metric == 'LogLoss'):
+                self.eval_dict['best_result'] = eval_results['valid']
+                self.eval_dict['final_result'] = eval_results['test']
+                is_improved = True
+                self.eval_dict['final_epoch'] = epoch
                 self.eval_dict['early_stop'] = 0
+            else:
+                self.eval_dict['early_stop'] += 1
             
             if (self.eval_dict['early_stop'] >= self.eval_dict['early_stop_max']):
                 early_stop = True
@@ -146,9 +198,15 @@ class Evaluator:
         for mode in ['valid', 'test']:
             logger.log('\t', mode, end='')
             for metric in self.metrics:
-                for K in self.K_list:
-                    result = eval_results[mode][metric][K]
-                    logger.log('{}@{}: {:.5f} '.format(metric, K, result), pre=False, end='')
+                if self.task == 'rec':
+                    for K in self.K_list:
+                        result = eval_results[mode][metric][K]
+                        logger.log('{}@{}: {:.5f} '.format(metric, K, result), pre=False, end='')
+                elif self.task == 'ctr':
+                    result = eval_results[mode][metric]
+                    logger.log('{}: {:.5f} '.format(metric, result), pre=False, end='')
+                else:
+                    raise NotImplementedError
             logger.log()
 
     @classmethod

@@ -4,6 +4,7 @@ __pycache__/
 checkpoints/
 logs/
 **/*.txt
+**/*.csv
 **/*.pkl
 **/*.dat
 search/log/
@@ -12,3 +13,4 @@ search/yamls/
 analysis.ipynb
 mlruns/
 figs/
+.*

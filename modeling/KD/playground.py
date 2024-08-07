@@ -11,7 +11,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph
-from .base_model import BaseKD
+from .base_model import BaseKD4Rec
 from .baseline import DE
 
 
@@ -258,7 +258,7 @@ class CPD(DE):
         return loss
 
 
-class NKD(BaseKD):
+class NKD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
         self.model_name = "nkd"
@@ -381,7 +381,7 @@ class NKD(BaseKD):
         return DE_loss
 
 
-class GraphD(BaseKD):
+class GraphD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
         self.model_name = "graphd"
@@ -504,7 +504,7 @@ class GraphD(BaseKD):
         return DE_loss
 
 
-class FilterD(BaseKD):
+class FilterD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
         self.model_name = "filterd"
@@ -641,7 +641,7 @@ class FilterD(BaseKD):
         return DE_loss
 
 
-class FD(BaseKD):
+class FD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
         self.model_name = "fd"
@@ -1025,7 +1025,7 @@ class GDCP(GraphD):
         return loss
 
 
-class FreqD(BaseKD):
+class FreqD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
         self.model_name = "freqd"

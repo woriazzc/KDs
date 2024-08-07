@@ -10,7 +10,7 @@ import torch.utils.data as data
 import torch.nn.functional as F
 
 from .utils import Expert
-from .base_model import BaseKD
+from .base_model import BaseKD4Rec
 
 
 class Scratch(nn.Module):
@@ -21,8 +21,11 @@ class Scratch(nn.Module):
         self.backbone = backbone
         self.training = True
 
-    def get_ratings(self, batch_user):
-        return self.backbone.get_ratings(batch_user)
+    def get_ratings(self, param):
+        if self.args.task == "ctr":
+            return self.backbone(param)
+        else:
+            return self.backbone.get_ratings(param)
 
     def do_something_in_each_epoch(self, epoch):
         return
@@ -38,9 +41,14 @@ class Scratch(nn.Module):
     def get_params_to_update(self):
         return [{"params": self.backbone.parameters(), 'lr': self.args.lr, 'weight_decay': self.args.wd}]
 
-    def forward(self, batch_user, batch_pos_item, batch_neg_item):
-        output = self.backbone(batch_user, batch_pos_item, batch_neg_item)
-        base_loss = self.backbone.get_loss(output)
+    def forward(self, *params):
+        if self.args.task == "ctr":
+            labels = params[-1]
+            output = self.backbone(*(params[:-1]))
+            base_loss = self.backbone.get_loss(output, labels)
+        else:
+            output = self.backbone(*params)
+            base_loss = self.backbone.get_loss(output)
         loss = base_loss
         return loss
 
@@ -49,7 +57,7 @@ class Scratch(nn.Module):
         return self.backbone.state_dict()
 
 
-class RD(BaseKD):
+class RD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
 
@@ -149,7 +157,7 @@ class RD(BaseKD):
         return  RD_loss
     
 
-class CD(BaseKD):
+class CD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
 
@@ -222,7 +230,7 @@ class CD(BaseKD):
         return CD_loss
 
 
-class DE(BaseKD):
+class DE(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
 
@@ -299,7 +307,7 @@ class DE(BaseKD):
         return DE_loss
 
 
-class RRD(BaseKD):
+class RRD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
         
@@ -395,7 +403,7 @@ class RRD(BaseKD):
         return URRD_loss
 
 
-class HTD(BaseKD):
+class HTD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
 
@@ -573,7 +581,7 @@ class HTD(BaseKD):
         return HTD_loss
 
 
-class UnKD(BaseKD):
+class UnKD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
 
@@ -763,7 +771,7 @@ class UnKD(BaseKD):
         return mf_loss
 
 
-class HetComp(BaseKD):
+class HetComp(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
         self.num_ckpt = args.hetcomp_num_ckpt

@@ -11,10 +11,14 @@ import torch.nn.functional as F
 import scipy.sparse as sp
 from scipy.sparse import csr_matrix
 
-from .base_model import BaseRec, BaseGCN
-from .utils import convert_sp_mat_to_sp_tensor, BehaviorAggregator, load_pkls, dump_pkls
+from .base_model import BaseRec, BaseGCN, BaseCTR
+from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls
+from .base_layer import BehaviorAggregator, FactorizationMachine, MultiLayerPerceptron
 
 
+"""
+Recommendation Models
+"""
 class BPR(BaseRec):
     def __init__(self, dataset, args):
         super(BPR, self).__init__(dataset, args)
@@ -388,3 +392,27 @@ class SimpleX(BaseRec):
         if self.enable_bias:
             score_mat += self.user_bias(batch_user.cuda()) + self.global_bias
         return score_mat
+
+
+
+"""
+CTR Prediction Models
+"""
+# https://github.com/frnetnetwork/frnet/blob/main/model/DeepFM.py
+class DeepFM(BaseCTR):
+    def __init__(self, args):
+        super().__init__(args)
+        self.fm = FactorizationMachine(reduce_sum=True)
+        self.embed_output_size = len(self.field_dims) * self.embed_dim
+        self.dropout = args.dropout
+        self.mlp_layers = args.mlp_layers
+        self.mlp = MultiLayerPerceptron(self.embed_output_size, self.mlp_layers, self.dropout, output_layer=True)
+
+    def forward(self, x):
+        """
+        :param x: B,F
+        :return:
+        """
+        x_embed = self.embedding(x)  # B,F,E
+        x_out = self.lr(x) + self.fm(x_embed) + self.mlp(x_embed.view(x.size(0), -1))
+        return x_out.squeeze(-1)

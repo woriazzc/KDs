@@ -1,0 +1,5 @@
+header: True
+sep: ','
+num_feats: 39
+num_int_feats: 13
+min_threshold: 10
