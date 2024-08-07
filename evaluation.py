@@ -227,7 +227,13 @@ class Evaluator:
 
             logger.log(prefix + mode, end='')
             for metric in eval_dict[key].keys():
-                for K in eval_dict[key][metric].keys():
-                    result = eval_dict[key][metric][K]
-                    logger.log(' {}@{}: {:.5f}'.format(metric, K, result), pre=False, end='')
+                if isinstance(eval_dict[key][metric], dict):
+                    for K in eval_dict[key][metric].keys():
+                        result = eval_dict[key][metric][K]
+                        logger.log(' {}@{}: {:.5f}'.format(metric, K, result), pre=False, end='')
+                elif isinstance(eval_dict[key][metric], float):
+                    result = eval_dict[key][metric]
+                    logger.log(' {}: {:.5f}'.format(metric, result), pre=False, end='')
+                else:
+                    raise NotImplementedError
             logger.log()
