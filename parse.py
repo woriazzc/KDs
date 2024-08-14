@@ -7,6 +7,7 @@ from utils import load_yaml
 LOG_DIR = 'logs/'
 CONFIG_DIR = 'configs/'
 DATA_DIR = 'data/'
+CKPT_DIR = 'checkpoints/'
 
 
 parser = argparse.ArgumentParser(description=__doc__,
@@ -64,7 +65,7 @@ parser.add_argument(
 args = parser.parse_args()
 if args.train_teacher:
     args.model = "scratch"
-args.__dict__.update({"LOG_DIR": LOG_DIR, "CONFIG_DIR": CONFIG_DIR, "DATA_DIR": DATA_DIR})
+args.__dict__.update({"LOG_DIR": LOG_DIR, "CONFIG_DIR": CONFIG_DIR, "DATA_DIR": DATA_DIR, "CKPT_DIR": CKPT_DIR})
 
 """
 create args for backbone

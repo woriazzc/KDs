@@ -1,6 +1,7 @@
 from copy import deepcopy
 import time
 import numpy as np
+from tqdm import tqdm
 from sklearn.metrics import log_loss, roc_auc_score
 
 import torch
@@ -8,6 +9,7 @@ import torch.utils.data as data
 
 from utils import to_np
 from utils.metric import Precision, Recall, NDCG, get_labels
+from dataset import get_labels as get_ctr_labels
 
 
 METRIC2FUNC = {'Recall': Recall, 'NDCG': NDCG, 'Precision': Precision, 'AUC': roc_auc_score, 'LogLoss': log_loss}
@@ -123,13 +125,13 @@ class Evaluator:
             else:
                 loader = test_loader
             labels, predicts = list(), list()
-            for features, label in loader:
-                features = features.cuda()      # batch_size, F
-                label = label.cuda()  # batch_size
-                logits = model.get_ratings(features)
+            for data in tqdm(loader):
+                data = data.cuda()      # batch_size, F
+                label = get_ctr_labels(data, loader.feature_map).cuda()
+                logits = model.get_ratings(data)
                 y = torch.sigmoid(logits)
-                labels.extend(label.tolist())
-                predicts.extend(y.tolist())
+                labels.extend(label.squeeze(-1).tolist())
+                predicts.extend(y.squeeze(-1).tolist())
             
             for metric in self.metrics:
                 func = METRIC2FUNC[metric]

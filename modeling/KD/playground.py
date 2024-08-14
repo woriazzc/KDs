@@ -3,7 +3,6 @@ import math
 import mlflow
 import random
 import numpy as np
-from sklearn.metrics import ndcg_score
 
 from torch_cluster import knn
 import torch
@@ -11,7 +10,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph
-from .base_model import BaseKD4Rec
+from .base_model import BaseKD4Rec, BaseKD4CTR
 from .baseline import DE
 
 
@@ -1101,3 +1100,15 @@ class FreqD(BaseKD4Rec):
 
         DE_loss = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
         return DE_loss
+
+
+class BCED(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+
+    def get_loss(self, feature, label):
+        logit_S = self.student(feature)
+        logit_T = self.teacher(feature)
+        y_T = torch.sigmoid(logit_T)
+        loss = F.binary_cross_entropy_with_logits(logit_S, y_T.float())
+        return loss

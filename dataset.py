@@ -9,6 +9,11 @@ import numpy as np
 from pathlib import Path
 from functools import lru_cache
 from collections import defaultdict
+from fuxictr.features import FeatureMap
+from fuxictr.pytorch.dataloaders import RankDataLoader
+from fuxictr.preprocess import build_dataset
+from fuxictr.datasets.criteo import FeatureProcessor
+from fuxictr.utils import load_dataset_config
 
 import torch
 import torch.nn as nn
@@ -177,6 +182,30 @@ class implicit_CF_dataset_test(data.Dataset):
 #################################################################################################################
 # CTR datasets
 #################################################################################################################
+
+def get_labels(inputs, feature_map):
+    labels = feature_map.labels
+    y = inputs[:, feature_map.get_column_index(labels[0])]
+    return y.float().view(-1, 1)
+
+
+def get_fuxictr_loaders(args):
+    params = load_dataset_config(os.path.join(args.DATA_DIR, args.dataset), args.dataset)
+    data_dir = os.path.join(args.DATA_DIR, args.dataset, params["dataset_id"])
+    feature_map_json = os.path.join(data_dir, "feature_map.json")
+    # Build feature_map and transform data
+    feature_encoder = FeatureProcessor(**params)
+    params["train_data"], params["valid_data"], params["test_data"] = \
+        build_dataset(feature_encoder, **params)
+    feature_map = FeatureMap(params['dataset_id'], data_dir)
+    feature_map.load(feature_map_json, params)
+    train_gen, valid_gen = RankDataLoader(feature_map, stage='train', batch_size=args.batch_size, **params).make_iterator()
+    test_gen = RankDataLoader(feature_map, stage='test', batch_size=args.batch_size, **params).make_iterator()
+    train_gen.feature_map = feature_map
+    valid_gen.feature_map = feature_map
+    test_gen.feature_map = feature_map
+    return train_gen, valid_gen, test_gen, feature_map
+
 
 class CTRDataset(data.Dataset):
     """

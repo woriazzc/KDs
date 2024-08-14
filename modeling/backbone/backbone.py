@@ -10,10 +10,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import scipy.sparse as sp
 from scipy.sparse import csr_matrix
+from fuxictr.pytorch.models import BaseModel as fuxiBaseModel
+from fuxictr.pytorch.layers import FeatureEmbedding, MLP_Block, FactorizationMachine, CrossNetV2, CrossNetMix
 
 from .base_model import BaseRec, BaseGCN, BaseCTR
 from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls
-from .base_layer import BehaviorAggregator, FactorizationMachine, MultiLayerPerceptron
+from .base_layer import BehaviorAggregator, MultiLayerPerceptron
 
 
 """
@@ -416,3 +418,208 @@ class DeepFM(BaseCTR):
         x_embed = self.embedding(x)  # B,F,E
         x_out = self.lr(x) + self.fm(x_embed) + self.mlp(x_embed.view(x.size(0), -1))
         return x_out.squeeze(-1)
+
+
+def sum_emb_out_dim(feature_map, emb_dim, feature_source=[]):
+        if type(feature_source) != list:
+            feature_source = [feature_source]
+        total_dim = 0
+        for feature, feature_spec in feature_map.features.items():
+            if feature_spec["type"] == "meta":
+                continue
+            if len(feature_source) == 0 or feature_spec.get("source") in feature_source:
+                total_dim += feature_spec.get("emb_output_dim",
+                                              feature_spec.get("embedding_dim", 
+                                                               emb_dim))
+        return total_dim
+
+
+class DeepFM(fuxiBaseModel):
+    def __init__(self, 
+                 feature_map, 
+                 model_id="DeepFM", 
+                 gpu=0, 
+                 embedding_dim=10, 
+                 hidden_units=[64, 64, 64], 
+                 hidden_activations="ReLU", 
+                 net_dropout=0, 
+                 batch_norm=False, 
+                 embedding_regularizer=None, 
+                 net_regularizer=None,
+                 **kwargs):
+        kwargs.update({"verbose": 0, "task": "binary_classification", "model_root": kwargs["CKPT_DIR"], "metrics": ["logloss", "AUC"]})
+        super(DeepFM, self).__init__(feature_map, 
+                                     model_id=model_id, 
+                                     gpu=gpu, 
+                                     embedding_regularizer=embedding_regularizer, 
+                                     net_regularizer=net_regularizer,
+                                     **kwargs)
+        self.embedding_layer = FeatureEmbedding(feature_map, embedding_dim)
+        self.fm = FactorizationMachine(feature_map)
+        self.mlp = MLP_Block(input_dim=sum_emb_out_dim(feature_map, embedding_dim),
+                             output_dim=1, 
+                             hidden_units=hidden_units,
+                             hidden_activations=hidden_activations,
+                             output_activation=None, 
+                             dropout_rates=net_dropout, 
+                             batch_norm=batch_norm)
+        self.reset_parameters()
+        self.model_to_device()
+            
+    def forward(self, inputs):
+        """
+        Inputs: [X,y]
+        """
+        X = self.get_inputs(inputs)
+        feature_emb = self.embedding_layer(X)
+        logit = self.fm(X, feature_emb)
+        logit += self.mlp(feature_emb.flatten(start_dim=1))
+        return logit
+    
+    def get_loss(self, output, labels):
+        """Compute the loss function with the model output
+
+        Parameters
+        ----------
+        output : 
+            model output (results of forward function)
+        labels:
+            label of this sample
+
+        Returns
+        -------
+        loss : float
+        """
+        loss = F.binary_cross_entropy_with_logits(output, labels.float())
+        loss += self.regularization_loss()
+        return loss
+
+
+class DCNv2(fuxiBaseModel):
+    def __init__(self, 
+                 feature_map, 
+                 model_id="DCNv2", 
+                 gpu=0,
+                 model_structure="parallel",
+                 use_low_rank_mixture=False,
+                 low_rank=32,
+                 num_experts=4,
+                 embedding_dim=10, 
+                 stacked_dnn_hidden_units=[], 
+                 parallel_dnn_hidden_units=[],
+                 dnn_activations="ReLU",
+                 num_cross_layers=3,
+                 net_dropout=0, 
+                 batch_norm=False, 
+                 embedding_regularizer=None,
+                 net_regularizer=None, 
+                 **kwargs):
+        kwargs.update({"verbose": 0, "task": "binary_classification", "model_root": kwargs["CKPT_DIR"], "metrics": ["logloss", "AUC"]})
+        super(DCNv2, self).__init__(feature_map, 
+                                    model_id=model_id, 
+                                    gpu=gpu, 
+                                    embedding_regularizer=embedding_regularizer, 
+                                    net_regularizer=net_regularizer,
+                                    **kwargs)
+        self.embedding_layer = FeatureEmbedding(feature_map, embedding_dim)
+        input_dim = sum_emb_out_dim(feature_map, embedding_dim)
+        if use_low_rank_mixture:
+            self.crossnet = CrossNetMix(input_dim, num_cross_layers, low_rank=low_rank, num_experts=num_experts)
+        else:
+            self.crossnet = CrossNetV2(input_dim, num_cross_layers)
+        self.model_structure = model_structure
+        assert self.model_structure in ["crossnet_only", "stacked", "parallel", "stacked_parallel"], \
+               "model_structure={} not supported!".format(self.model_structure)
+        if self.model_structure in ["stacked", "stacked_parallel"]:
+            self.stacked_dnn = MLP_Block(input_dim=input_dim,
+                                         output_dim=None, # output hidden layer
+                                         hidden_units=stacked_dnn_hidden_units,
+                                         hidden_activations=dnn_activations,
+                                         output_activation=None, 
+                                         dropout_rates=net_dropout,
+                                         batch_norm=batch_norm)
+            final_dim = stacked_dnn_hidden_units[-1]
+        if self.model_structure in ["parallel", "stacked_parallel"]:
+            self.parallel_dnn = MLP_Block(input_dim=input_dim,
+                                          output_dim=None, # output hidden layer
+                                          hidden_units=parallel_dnn_hidden_units,
+                                          hidden_activations=dnn_activations,
+                                          output_activation=None, 
+                                          dropout_rates=net_dropout, 
+                                          batch_norm=batch_norm)
+            final_dim = input_dim + parallel_dnn_hidden_units[-1]
+        if self.model_structure == "stacked_parallel":
+            final_dim = stacked_dnn_hidden_units[-1] + parallel_dnn_hidden_units[-1]
+        if self.model_structure == "crossnet_only": # only CrossNet
+            final_dim = input_dim
+        self.fc = nn.Linear(final_dim, 1)
+        self.reset_parameters()
+        self.model_to_device()
+
+    def forward(self, inputs):
+        X = self.get_inputs(inputs)
+        feature_emb = self.embedding_layer(X, flatten_emb=True)
+        cross_out = self.crossnet(feature_emb)
+        if self.model_structure == "crossnet_only":
+            final_out = cross_out
+        elif self.model_structure == "stacked":
+            final_out = self.stacked_dnn(cross_out)
+        elif self.model_structure == "parallel":
+            dnn_out = self.parallel_dnn(feature_emb)
+            final_out = torch.cat([cross_out, dnn_out], dim=-1)
+        elif self.model_structure == "stacked_parallel":
+            final_out = torch.cat([self.stacked_dnn(cross_out), self.parallel_dnn(feature_emb)], dim=-1)
+        logit = self.fc(final_out)
+        return logit
+    
+    def get_loss(self, output, labels):
+        loss = F.binary_cross_entropy_with_logits(output, labels.float())
+        loss += self.regularization_loss()
+        return loss
+
+
+class DNN(fuxiBaseModel):
+    def __init__(self, 
+                 feature_map, 
+                 model_id="DNN", 
+                 gpu=0, 
+                 embedding_dim=10, 
+                 hidden_units=[64, 64, 64], 
+                 hidden_activations="ReLU", 
+                 net_dropout=0, 
+                 batch_norm=False, 
+                 embedding_regularizer=None, 
+                 net_regularizer=None,
+                 **kwargs):
+        kwargs.update({"verbose": 0, "task": "binary_classification", "model_root": kwargs["CKPT_DIR"], "metrics": ["logloss", "AUC"]})
+        super(DNN, self).__init__(feature_map, 
+                                  model_id=model_id, 
+                                  gpu=gpu, 
+                                  embedding_regularizer=embedding_regularizer, 
+                                  net_regularizer=net_regularizer,
+                                  **kwargs)
+        self.embedding_layer = FeatureEmbedding(feature_map, embedding_dim)
+        self.mlp = MLP_Block(input_dim=sum_emb_out_dim(feature_map, embedding_dim),
+                             output_dim=1, 
+                             hidden_units=hidden_units,
+                             hidden_activations=hidden_activations,
+                             output_activation=None,
+                             dropout_rates=net_dropout,
+                             batch_norm=batch_norm)
+        self.reset_parameters()
+        self.model_to_device()
+            
+    def forward(self, inputs):
+        """
+        Inputs: [X,y]
+        """
+        X = self.get_inputs(inputs)
+        feature_emb = self.embedding_layer(X, flatten_emb=True)
+        logit = self.mlp(feature_emb)
+        return logit
+
+    def get_loss(self, output, labels):
+        loss = F.binary_cross_entropy_with_logits(output, labels.float())
+        loss += self.regularization_loss()
+        return loss
+    

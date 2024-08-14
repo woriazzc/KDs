@@ -15,7 +15,6 @@ class BaseKD(nn.Module):
         self.student = student
         self.frozen_teacher = frozen_teacher
         self.teacher.eval()
-        self.dataset = self.teacher.dataset
         self.lmbda = args.lmbda
 
         if self.frozen_teacher:
@@ -26,12 +25,7 @@ class BaseKD(nn.Module):
         raise NotImplementedError
     
     def get_ratings(self, param):
-        if self.args.task == "ctr":
-            return self.student(param)
-        elif self.args.task == "rec":
-            return self.student.get_ratings(param)
-        else:
-            raise NotImplementedError
+        raise NotImplementedError
 
     def do_something_in_each_epoch(self, epoch):
         return
@@ -58,7 +52,7 @@ class BaseKD(nn.Module):
 class BaseKD4Rec(BaseKD):
     def __init__(self, args, teacher, student, frozen_teacher=True):
         super().__init__(args, teacher, student, frozen_teacher)
-        
+        self.dataset = self.teacher.dataset
         self.num_users = self.dataset.num_users
         self.num_items = self.dataset.num_items
 
@@ -68,11 +62,17 @@ class BaseKD4Rec(BaseKD):
         kd_loss = self.get_loss(batch_user, batch_pos_item, batch_neg_item)
         loss = base_loss + self.lmbda * kd_loss
         return loss
+    
+    def get_ratings(self, batch_user):
+        return self.student.get_ratings(batch_user)
 
 
 class BaseKD4CTR(BaseKD):
     def __init__(self, args, teacher, student, frozen_teacher=True):
         super().__init__(args, teacher, student, frozen_teacher)
+    
+    def get_params_to_update(self):
+        return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': 0}]
 
     def forward(self, feature, label):
         output = self.student(feature)
@@ -80,3 +80,6 @@ class BaseKD4CTR(BaseKD):
         kd_loss = self.get_loss(feature, label)
         loss = base_loss + self.lmbda * kd_loss
         return loss
+
+    def get_ratings(self, data):
+        return self.student(data)

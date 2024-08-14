@@ -1,14 +1,13 @@
 import os
 import time
-import numpy as np
+from tqdm import tqdm
 from copy import deepcopy
 
 import torch
 import torch.optim as optim
-from torch.utils.data import DataLoader
 
 from parse import *
-from dataset import CTRDataset
+from dataset import get_fuxictr_loaders, get_labels
 from evaluation import Evaluator
 import modeling.backbone as backbone
 import modeling.KD as KD
@@ -16,14 +15,7 @@ from utils import seed_all, avg_dict, Logger
 
 def main(args):
     # Dataset
-    trainset = CTRDataset(args.dataset, 'train')
-    validset = CTRDataset(args.dataset, 'valid')
-    testset = CTRDataset(args.dataset, 'test')
-    train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True)
-    valid_loader = DataLoader(validset, batch_size=args.batch_size, shuffle=False)
-    test_loader = DataLoader(testset, batch_size=args.batch_size, shuffle=False)
-    args.field_dims = trainset.field_dims
-    args.early_stop_metric = "AUC"
+    train_loader, valid_loader, test_loader, feature_map = get_fuxictr_loaders(args)
 
     # Backbone
     all_backbones = [e.lower() for e in dir(backbone)]
@@ -31,19 +23,20 @@ def main(args):
         all_teacher_args, all_student_args = deepcopy(args), deepcopy(args)
         all_teacher_args.__dict__.update(teacher_args.__dict__)
         all_student_args.__dict__.update(student_args.__dict__)
-        Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(all_teacher_args).cuda()
-        Student = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(all_student_args).cuda()
+        Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(feature_map, **all_teacher_args.__dict__).cuda()
+        Student = getattr(backbone, dir(backbone)[all_backbones.index(all_student_args.model.lower())])(feature_map, **all_student_args.__dict__).cuda()
     else:
         logger.log(f'Invalid backbone {args.backbone}.')
         raise(NotImplementedError, f'Invalid backbone {args.backbone}.')
 
+    # KD model
     if args.model.lower() == "scratch":
         if args.train_teacher:
             model = KD.Scratch(args, Teacher).cuda()
         else:
             model = KD.Scratch(args, Student).cuda()
     else:
-        T_path = os.path.join("checkpoints", args.dataset, args.backbone, f"scratch-{teacher_args.embedding_dim}", "BEST_EPOCH.pt")
+        T_path = os.path.join("checkpoints", args.dataset, args.backbone, f"scratch-{teacher_args.model.lower()}-{teacher_args.embedding_dim}", "BEST_EPOCH.pt")
         Teacher.load_state_dict(torch.load(T_path))
         all_models = [e.lower() for e in dir(KD)]
         if args.model.lower() in all_models:
@@ -80,13 +73,13 @@ def main(args):
         epoch_loss = []
         logger.log('Training...')
         
-        for idx, (features, labels) in enumerate(train_loader):
-            features = features.cuda()      # batch_size, F
-            labels = labels.cuda()  # batch_size
+        for idx, data in enumerate(tqdm(train_loader)):
+            labels = get_labels(data, feature_map).cuda()
+            data = data.cuda()
             
             # Forward Pass
             model.train()
-            loss = model(features, labels)
+            loss = model(data, labels)
 
             # Backward and optimize
             optimizer.zero_grad()
@@ -116,8 +109,9 @@ def main(args):
     eval_dict = evaluator.eval_dict
     Evaluator.print_final_result(logger, eval_dict)
     if not args.no_save:
-        embedding_dim = Teacher.embedding_dim if args.train_teacher else Student.embedding_dim
-        save_dir = os.path.join("checkpoints", args.dataset, args.backbone, f"{args.model.lower()}-{embedding_dim}")
+        embedding_dim = teacher_args.embedding_dim if args.train_teacher else student_args.embedding_dim
+        backbone_name = teacher_args.model if args.train_teacher else student_args.model
+        save_dir = os.path.join("checkpoints", args.dataset, args.backbone, f"{args.model.lower()}-{backbone_name.lower()}-{embedding_dim}")
         os.makedirs(save_dir, exist_ok=True)
         torch.save(best_model, os.path.join(save_dir, "BEST_EPOCH.pt"))
         for idx, ckpt in enumerate(ckpts):
@@ -132,6 +126,7 @@ if __name__ == '__main__':
     os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
     logger = Logger(args, args.no_log)
     args.task = 'ctr'
+    args.early_stop_metric = "AUC"
 
     if args.run_all:
         args_copy = deepcopy(args)

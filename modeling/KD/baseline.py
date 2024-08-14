@@ -43,8 +43,8 @@ class Scratch(nn.Module):
 
     def forward(self, *params):
         if self.args.task == "ctr":
-            labels = params[-1]
-            output = self.backbone(*(params[:-1]))
+            data, labels = params
+            output = self.backbone(data)
             base_loss = self.backbone.get_loss(output, labels)
         else:
             output = self.backbone(*params)

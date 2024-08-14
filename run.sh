@@ -80,4 +80,7 @@ python -u main.py --dataset=yelp --backbone=bpr --model=rrd
 For CTR Prediction Models
 """
 # train teacher
-python -u main_ctr.py --dataset=criteo --backbone=deepfm --train_teacher --cfg wd=0.01 --suffix teacher
+python -u main_ctr.py --dataset=criteo --backbone=deepfm --train_teacher --suffix teacher
+
+# KD
+python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=bced
