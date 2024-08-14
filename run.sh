@@ -17,7 +17,7 @@ python -u main.py --dataset=yelp --backbone=bpr --train_teacher --suffix teacher
 python -u main.py --dataset=yelp --backbone=lightgcn --train_teacher --teacher embedding_dim=1000 num_layers=3 --cfg wd=1e-7 --suffix teacher
 python -u main.py --dataset=yelp --backbone=simplex --train_teacher --teacher embedding_dim=500 --cfg wd=1e-8 num_ns=1000 --suffix teacher
 
-#from scratch
+# from scratch
 python -u main.py --dataset=foursquare --backbone=bpr --model=scratch --student embedding_dim=10 --cfg wd=0.01 --suffix student
 python -u main.py --dataset=foursquare --backbone=lightgcn --model=scratch --student embedding_dim=10 num_layers=1 --cfg wd=0.01 --suffix student
 
@@ -81,6 +81,11 @@ For CTR Prediction Models
 """
 # train teacher
 python -u main_ctr.py --dataset=criteo --backbone=deepfm --train_teacher --suffix teacher
+python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --train_teacher --suffix teacher
+
+# from scratch
+python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=scratch --suffix student
 
 # KD
 python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=bced
+python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=clid
