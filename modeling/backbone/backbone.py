@@ -13,9 +13,9 @@ from scipy.sparse import csr_matrix
 from fuxictr.pytorch.models import BaseModel as fuxiBaseModel
 from fuxictr.pytorch.layers import FeatureEmbedding, MLP_Block, FactorizationMachine, CrossNetV2, CrossNetMix
 
-from .base_model import BaseRec, BaseGCN, BaseCTR
-from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls
-from .base_layer import BehaviorAggregator, MultiLayerPerceptron
+from .base_model import BaseRec, BaseGCN
+from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls, sum_emb_out_dim
+from .base_layer import BehaviorAggregator
 
 
 """
@@ -400,40 +400,6 @@ class SimpleX(BaseRec):
 """
 CTR Prediction Models
 """
-# https://github.com/frnetnetwork/frnet/blob/main/model/DeepFM.py
-class DeepFM(BaseCTR):
-    def __init__(self, args):
-        super().__init__(args)
-        self.fm = FactorizationMachine(reduce_sum=True)
-        self.embed_output_size = len(self.field_dims) * self.embed_dim
-        self.dropout = args.dropout
-        self.mlp_layers = args.mlp_layers
-        self.mlp = MultiLayerPerceptron(self.embed_output_size, self.mlp_layers, self.dropout, output_layer=True)
-
-    def forward(self, x):
-        """
-        :param x: B,F
-        :return:
-        """
-        x_embed = self.embedding(x)  # B,F,E
-        x_out = self.lr(x) + self.fm(x_embed) + self.mlp(x_embed.view(x.size(0), -1))
-        return x_out.squeeze(-1)
-
-
-def sum_emb_out_dim(feature_map, emb_dim, feature_source=[]):
-        if type(feature_source) != list:
-            feature_source = [feature_source]
-        total_dim = 0
-        for feature, feature_spec in feature_map.features.items():
-            if feature_spec["type"] == "meta":
-                continue
-            if len(feature_source) == 0 or feature_spec.get("source") in feature_source:
-                total_dim += feature_spec.get("emb_output_dim",
-                                              feature_spec.get("embedding_dim", 
-                                                               emb_dim))
-        return total_dim
-
-
 class DeepFM(fuxiBaseModel):
     def __init__(self, 
                  feature_map, 
