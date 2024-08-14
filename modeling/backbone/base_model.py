@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .base_layer import FeaturesLinear, FeaturesEmbedding
+from fuxictr.pytorch.models import BaseModel as fuxiBaseModel
 
 
 class BaseRec(nn.Module):
@@ -161,3 +161,35 @@ class BaseGCN(BaseRec):
         users = users[batch_user]
         score_mat = torch.matmul(users, items.T)
         return score_mat
+
+
+class BaseCTR(fuxiBaseModel):
+    def __init__(self, feature_map, **kwargs):
+        kwargs.update({"verbose": 0, "task": "binary_classification", "model_root": kwargs["CKPT_DIR"], "metrics": ["logloss", "AUC"]})
+        super().__init__(feature_map, **kwargs)
+
+    def forward_embed(self, inputs):
+        """Return the output of the embedding layer
+        Inputs: [X,y]
+        """
+        X = self.get_inputs(inputs)
+        feature_emb = self.embedding_layer(X)
+        return feature_emb
+    
+    def get_loss(self, output, labels):
+        """Compute the loss function with the model output
+
+        Parameters
+        ----------
+        output : 
+            model output (results of forward function)
+        labels:
+            label of this sample
+
+        Returns
+        -------
+        loss : float
+        """
+        loss = F.binary_cross_entropy_with_logits(output, labels.float())
+        loss += self.regularization_loss()
+        return loss

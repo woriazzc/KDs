@@ -10,10 +10,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import scipy.sparse as sp
 from scipy.sparse import csr_matrix
-from fuxictr.pytorch.models import BaseModel as fuxiBaseModel
 from fuxictr.pytorch.layers import FeatureEmbedding, MLP_Block, FactorizationMachine, CrossNetV2, CrossNetMix
 
-from .base_model import BaseRec, BaseGCN
+from .base_model import BaseRec, BaseGCN, BaseCTR
 from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls, sum_emb_out_dim
 from .base_layer import BehaviorAggregator
 
@@ -400,7 +399,7 @@ class SimpleX(BaseRec):
 """
 CTR Prediction Models
 """
-class DeepFM(fuxiBaseModel):
+class DeepFM(BaseCTR):
     def __init__(self, 
                  feature_map, 
                  model_id="DeepFM", 
@@ -413,7 +412,6 @@ class DeepFM(fuxiBaseModel):
                  embedding_regularizer=None, 
                  net_regularizer=None,
                  **kwargs):
-        kwargs.update({"verbose": 0, "task": "binary_classification", "model_root": kwargs["CKPT_DIR"], "metrics": ["logloss", "AUC"]})
         super(DeepFM, self).__init__(feature_map, 
                                      model_id=model_id, 
                                      gpu=gpu, 
@@ -431,7 +429,7 @@ class DeepFM(fuxiBaseModel):
                              batch_norm=batch_norm)
         self.reset_parameters()
         self.model_to_device()
-            
+
     def forward(self, inputs):
         """
         Inputs: [X,y]
@@ -441,27 +439,9 @@ class DeepFM(fuxiBaseModel):
         logit = self.fm(X, feature_emb)
         logit += self.mlp(feature_emb.flatten(start_dim=1))
         return logit
-    
-    def get_loss(self, output, labels):
-        """Compute the loss function with the model output
-
-        Parameters
-        ----------
-        output : 
-            model output (results of forward function)
-        labels:
-            label of this sample
-
-        Returns
-        -------
-        loss : float
-        """
-        loss = F.binary_cross_entropy_with_logits(output, labels.float())
-        loss += self.regularization_loss()
-        return loss
 
 
-class DCNv2(fuxiBaseModel):
+class DCNv2(BaseCTR):
     def __init__(self, 
                  feature_map, 
                  model_id="DCNv2", 
@@ -480,7 +460,6 @@ class DCNv2(fuxiBaseModel):
                  embedding_regularizer=None,
                  net_regularizer=None, 
                  **kwargs):
-        kwargs.update({"verbose": 0, "task": "binary_classification", "model_root": kwargs["CKPT_DIR"], "metrics": ["logloss", "AUC"]})
         super(DCNv2, self).__init__(feature_map, 
                                     model_id=model_id, 
                                     gpu=gpu, 
@@ -537,14 +516,9 @@ class DCNv2(fuxiBaseModel):
             final_out = torch.cat([self.stacked_dnn(cross_out), self.parallel_dnn(feature_emb)], dim=-1)
         logit = self.fc(final_out)
         return logit
-    
-    def get_loss(self, output, labels):
-        loss = F.binary_cross_entropy_with_logits(output, labels.float())
-        loss += self.regularization_loss()
-        return loss
 
 
-class DNN(fuxiBaseModel):
+class DNN(BaseCTR):
     def __init__(self, 
                  feature_map, 
                  model_id="DNN", 
@@ -557,7 +531,6 @@ class DNN(fuxiBaseModel):
                  embedding_regularizer=None, 
                  net_regularizer=None,
                  **kwargs):
-        kwargs.update({"verbose": 0, "task": "binary_classification", "model_root": kwargs["CKPT_DIR"], "metrics": ["logloss", "AUC"]})
         super(DNN, self).__init__(feature_map, 
                                   model_id=model_id, 
                                   gpu=gpu, 
@@ -574,7 +547,7 @@ class DNN(fuxiBaseModel):
                              batch_norm=batch_norm)
         self.reset_parameters()
         self.model_to_device()
-            
+    
     def forward(self, inputs):
         """
         Inputs: [X,y]
@@ -583,9 +556,3 @@ class DNN(fuxiBaseModel):
         feature_emb = self.embedding_layer(X, flatten_emb=True)
         logit = self.mlp(feature_emb)
         return logit
-
-    def get_loss(self, output, labels):
-        loss = F.binary_cross_entropy_with_logits(output, labels.float())
-        loss += self.regularization_loss()
-        return loss
-    
