@@ -72,8 +72,9 @@ def main(args):
 
         epoch_loss = []
         logger.log('Training...')
-        
-        for idx, data in enumerate(tqdm(train_loader)):
+
+        iterator = train_loader if args.no_log else tqdm(train_loader)
+        for idx, data in enumerate(iterator):
             labels = get_labels(data, feature_map).cuda()
             data = data.cuda()
             
@@ -127,6 +128,7 @@ if __name__ == '__main__':
     logger = Logger(args, args.no_log)
     args.task = 'ctr'
     args.early_stop_metric = "AUC"
+    args.early_stop_patience = 3
 
     if args.run_all:
         args_copy = deepcopy(args)

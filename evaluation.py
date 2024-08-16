@@ -125,7 +125,7 @@ class Evaluator:
             else:
                 loader = test_loader
             labels, predicts = list(), list()
-            for data in tqdm(loader):
+            for data in loader:
                 data = data.cuda()      # batch_size, F
                 label = get_ctr_labels(data, loader.feature_map).cuda()
                 logits = model.get_ratings(data)
