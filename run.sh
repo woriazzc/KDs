@@ -89,3 +89,4 @@ python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=scratch --suffi
 # KD
 python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=bced
 python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=clid
+python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=fitnet

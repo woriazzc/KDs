@@ -16,3 +16,4 @@ figs/
 .*
 *.json
 *.npz
+*.npy
