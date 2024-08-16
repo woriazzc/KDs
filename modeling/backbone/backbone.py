@@ -418,6 +418,7 @@ class DeepFM(BaseCTR):
                                      embedding_regularizer=embedding_regularizer, 
                                      net_regularizer=net_regularizer,
                                      **kwargs)
+        self.embedding_dim = embedding_dim
         self.embedding_layer = FeatureEmbedding(feature_map, embedding_dim)
         self.fm = FactorizationMachine(feature_map)
         self.mlp = MLP_Block(input_dim=sum_emb_out_dim(feature_map, embedding_dim),
@@ -466,6 +467,7 @@ class DCNv2(BaseCTR):
                                     embedding_regularizer=embedding_regularizer, 
                                     net_regularizer=net_regularizer,
                                     **kwargs)
+        self.embedding_dim = embedding_dim
         self.embedding_layer = FeatureEmbedding(feature_map, embedding_dim)
         input_dim = sum_emb_out_dim(feature_map, embedding_dim)
         if use_low_rank_mixture:
@@ -537,6 +539,7 @@ class DNN(BaseCTR):
                                   embedding_regularizer=embedding_regularizer, 
                                   net_regularizer=net_regularizer,
                                   **kwargs)
+        self.embedding_dim = embedding_dim
         self.embedding_layer = FeatureEmbedding(feature_map, embedding_dim)
         self.mlp = MLP_Block(input_dim=sum_emb_out_dim(feature_map, embedding_dim),
                              output_dim=1, 
