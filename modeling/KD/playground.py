@@ -1129,3 +1129,23 @@ class CLID(BaseKD4CTR):
         y_S = y_S / y_S.sum()
         loss = F.binary_cross_entropy(y_S, y_T)
         return loss
+
+
+class FitNet(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "fitnet"
+        self.num_experts = args.fitnet_num_experts
+        self.dropout_rate = args.fitnet_dropout_rate
+        self.projectors = Projector(self.student.embedding_dim, self.teacher.embedding_dim, self.num_experts, norm=True, dropout_rate=self.dropout_rate)
+    
+    def get_loss(self, feature, label):
+        S_emb = self.student.forward_embed(feature)
+        T_emb = self.teacher.forward_embed(feature)
+        norm_T = T_emb.pow(2).sum(-1, keepdim=True).pow(1. / 2)
+        norm_T = torch.maximum(norm_T, torch.tensor(1e-7, device=norm_T.device))
+        T_emb = T_emb.div(norm_T)
+        cos_theta = (T_emb * S_emb).sum(-1, keepdim=True)
+        G_diff = 1. - cos_theta
+        loss = G_diff.mean()
+        return loss
