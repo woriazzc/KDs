@@ -9,7 +9,6 @@ import torch.utils.data as data
 
 from utils import to_np
 from utils.metric import Precision, Recall, NDCG, get_labels
-from dataset import get_labels as get_ctr_labels
 
 
 METRIC2FUNC = {'Recall': Recall, 'NDCG': NDCG, 'Precision': Precision, 'AUC': roc_auc_score, 'LogLoss': log_loss}
@@ -126,8 +125,7 @@ class Evaluator:
                 loader = test_loader
             labels, predicts = list(), list()
             for data in loader:
-                data = data.cuda()      # batch_size, F
-                label = get_ctr_labels(data, loader.feature_map).cuda()
+                label = data["label"].cuda()
                 logits = model.get_ratings(data)
                 y = torch.sigmoid(logits)
                 labels.extend(label.squeeze(-1).tolist())

@@ -7,7 +7,7 @@ import torch
 import torch.optim as optim
 
 from parse import *
-from dataset import get_fuxictr_loaders, get_labels
+from dataset import get_ctr_dataset
 from evaluation import Evaluator
 import modeling.backbone as backbone
 import modeling.KD as KD
@@ -15,7 +15,7 @@ from utils import seed_all, avg_dict, Logger
 
 def main(args):
     # Dataset
-    train_loader, valid_loader, test_loader, feature_map = get_fuxictr_loaders(args)
+    train_loader, valid_loader, test_loader, feature_stastic = get_ctr_dataset(args)
 
     # Backbone
     all_backbones = [e.lower() for e in dir(backbone)]
@@ -23,8 +23,8 @@ def main(args):
         all_teacher_args, all_student_args = deepcopy(args), deepcopy(args)
         all_teacher_args.__dict__.update(teacher_args.__dict__)
         all_student_args.__dict__.update(student_args.__dict__)
-        Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(feature_map, **all_teacher_args.__dict__).cuda()
-        Student = getattr(backbone, dir(backbone)[all_backbones.index(all_student_args.model.lower())])(feature_map, **all_student_args.__dict__).cuda()
+        Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(all_teacher_args, feature_stastic).cuda()
+        Student = getattr(backbone, dir(backbone)[all_backbones.index(all_student_args.model.lower())])(all_student_args, feature_stastic).cuda()
     else:
         logger.log(f'Invalid backbone {args.backbone}.')
         raise(NotImplementedError, f'Invalid backbone {args.backbone}.')
@@ -75,12 +75,11 @@ def main(args):
 
         iterator = train_loader if args.no_log else tqdm(train_loader)
         for idx, data in enumerate(iterator):
-            labels = get_labels(data, feature_map).cuda()
-            data = data.cuda()
+            label = data["label"].cuda()
             
             # Forward Pass
             model.train()
-            loss = model(data, labels)
+            loss = model(data, label)
 
             # Backward and optimize
             optimizer.zero_grad()

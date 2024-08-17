@@ -17,3 +17,8 @@ figs/
 *.json
 *.npz
 *.npy
+
+*_train
+*_val
+*_test
+*.cache

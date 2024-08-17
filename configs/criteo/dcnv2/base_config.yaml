@@ -1,21 +1,13 @@
 teacher:
   model: DCNv2
-  batch_norm: true
   embedding_dim: 20
-  embedding_regularizer: 1.0e-05
-  dnn_activations: relu
-  parallel_dnn_hidden_units: [1000, 1000, 1000, 1000, 1000]
-  net_dropout: 0.1
-  net_regularizer: 0
-  model_structure: parallel
-  num_cross_layers: 3
-  num_experts: 4
+  L2: 1.e-5
+  hidden_dims: [1000, 1000, 1000, 1000, 1000, 1]
+  dropout: 0.1
+  depth: 4
 student:
   model: DNN
-  batch_norm: false
   embedding_dim: 20
-  embedding_regularizer: 1.0e-05
-  hidden_activations: relu
-  hidden_units: [32]
-  net_dropout: 0.2
-  net_regularizer: 0
+  L2: 1.e-5
+  hidden_dims: [32, 1]
+  dropout: 0.1

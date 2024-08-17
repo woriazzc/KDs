@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from fuxictr.pytorch.models import BaseModel as fuxiBaseModel
+from .base_layer import Embedding
 
 
 class BaseRec(nn.Module):
@@ -163,33 +163,39 @@ class BaseGCN(BaseRec):
         return score_mat
 
 
-class BaseCTR(fuxiBaseModel):
-    def __init__(self, feature_map, **kwargs):
-        kwargs.update({"verbose": 0, "task": "binary_classification", "model_root": kwargs["CKPT_DIR"], "metrics": ["logloss", "AUC"]})
-        super().__init__(feature_map, **kwargs)
-
+class BaseCTR(nn.Module):
+    def __init__(self, args, feature_stastic):
+        super().__init__()
+        self.args = args
+        self.embedding_dim = args.embedding_dim
+        self.L2_weight = args.L2
+        self.embedding_layer = Embedding(self.embedding_dim, feature_stastic)
+    
     def forward_embed(self, inputs):
         """Return the output of the embedding layer
-        Inputs: [X,y]
         """
-        X = self.get_inputs(inputs)
-        feature_emb = self.embedding_layer(X)
-        return feature_emb
+        dense_input = self.embedding_layer(inputs)
+        return dense_input
+
+    def forward(self, sparse_input, dense_input=None):
+        dense_input = self.embedding_layer(sparse_input)
+        logits = self.FeatureInteraction(dense_input, sparse_input)
+        return logits
     
-    def get_loss(self, output, labels):
-        """Compute the loss function with the model output
+    def FeatureInteraction(self, dense_input, sparse_input):
+        raise NotImplementedError
 
-        Parameters
-        ----------
-        output : 
-            model output (results of forward function)
-        labels:
-            label of this sample
-
-        Returns
-        -------
-        loss : float
-        """
-        loss = F.binary_cross_entropy_with_logits(output, labels.float())
-        loss += self.regularization_loss()
+    def L2_Loss(self, weight):
+        if weight == 0:
+            return 0
+        loss = 0
+        for _, module in self.named_modules():
+                for p_name, param in module.named_parameters():
+                    if param.requires_grad:
+                        if p_name in ["weight", "bias"]:
+                            loss += torch.norm(param, p=2)
+        return loss * weight
+    
+    def get_loss(self, logits, label):
+        loss = F.binary_cross_entropy_with_logits(logits.squeeze(-1), label.squeeze(-1).float()) + self.L2_Loss(self.L2_weight)
         return loss

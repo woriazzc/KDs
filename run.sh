@@ -85,8 +85,13 @@ python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --train_teacher --suffix
 
 # from scratch
 python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=scratch --suffix student
+python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=scratch --suffix student
 
 # KD
 python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=bced
 python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=clid
 python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=fitnet
+
+python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=bced
+python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=clid
+python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=fitnet

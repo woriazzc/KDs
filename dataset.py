@@ -6,6 +6,7 @@ import pickle
 import shutil
 import struct
 import numpy as np
+from tqdm import tqdm
 from pathlib import Path
 from functools import lru_cache
 from collections import defaultdict
@@ -183,147 +184,66 @@ class implicit_CF_dataset_test(data.Dataset):
 # CTR datasets
 #################################################################################################################
 
-def get_labels(inputs, feature_map):
-    labels = feature_map.labels
-    y = inputs[:, feature_map.get_column_index(labels[0])]
-    return y.float().view(-1, 1)
-
-
-def get_fuxictr_loaders(args):
-    params = load_dataset_config(os.path.join(args.DATA_DIR, args.dataset), args.dataset)
-    data_dir = os.path.join(args.DATA_DIR, args.dataset, params["dataset_id"])
-    feature_map_json = os.path.join(data_dir, "feature_map.json")
-    # Build feature_map and transform data
-    feature_encoder = FeatureProcessor(**params)
-    params["train_data"], params["valid_data"], params["test_data"] = \
-        build_dataset(feature_encoder, **params)
-    feature_map = FeatureMap(params['dataset_id'], data_dir)
-    feature_map.load(feature_map_json, params)
-    train_gen, valid_gen = RankDataLoader(feature_map, stage='train', batch_size=args.batch_size, **params).make_iterator()
-    test_gen = RankDataLoader(feature_map, stage='test', batch_size=args.batch_size, **params).make_iterator()
-    train_gen.feature_map = feature_map
-    valid_gen.feature_map = feature_map
-    test_gen.feature_map = feature_map
-    return train_gen, valid_gen, test_gen, feature_map
-
-
-class CTRDataset(data.Dataset):
-    """
-    Data prepration:
-        * Remove the infrequent features (appearing in less than threshold instances) and treat them as a single feature
-        * Discretize numerical values by log2 transformation which is proposed by the winner of Criteo Competition
-        * Must put train.csv, valid.csv, test.csv in data_dir
-
-    :param dataset_name
-    """
-    def __init__(self, dataset_name, mode):
-        dataset_name = dataset_name.lower()
-        self.data_dir = os.path.join(DATA_DIR, dataset_name)
-        config = yaml.load(open(os.path.join(self.data_dir, 'config.yaml'), 'r'), Loader=yaml.FullLoader)
-        self.header = config['header']
-        self.sep = config['sep']
-        self.num_feats = config["num_feats"]
-        self.num_int_feats = config["num_int_feats"]
-        self.min_threshold = config["min_threshold"]
-        cache_dir = os.path.join(self.data_dir, f".{mode}")
-        data_path = os.path.join(self.data_dir, f"{mode}.csv")
-        if not Path(cache_dir).exists():
-            shutil.rmtree(cache_dir, ignore_errors=True)
-            self.__build_cache(data_path, cache_dir)
-
-        self.env = lmdb.open(cache_dir, create=False, lock=False, readonly=True)
-        with self.env.begin(write=False) as txn:
-            self.length = txn.stat()['entries'] - 1
-            self.field_dims = np.frombuffer(txn.get(b'field_dims'), dtype=np.uint32)
-
-    def __getitem__(self, index):
-        with self.env.begin(write=False) as txn:
-            np_array = np.frombuffer(
-                txn.get(struct.pack('>I', index)), dtype=np.uint32).astype(dtype=np.int64)
-        #     x, y
-        return np_array[1:], np_array[0]
-
-    def __len__(self):
-        return self.length
-
-    def __build_cache(self, path, cache_path):
-        temp_path = os.path.join(self.data_dir, "train.csv")
-        # count feature map
-        feat_mapper, defaults = self.__get_feat_mapper(temp_path)
-        # load feature map
-        with lmdb.open(cache_path, map_size=int(1e11)) as env:
-            field_dims = np.zeros(self.num_feats, dtype=np.uint32)
-            for i, fm in feat_mapper.items():
-                field_dims[i - 1] = len(fm) + 1
-
-            # write field_dims
-            with env.begin(write=True) as txn:
-                txn.put(b'field_dims', field_dims.tobytes())
-
-            for buffer in self.__yield_buffer(path, feat_mapper, defaults):
-                with env.begin(write=True) as txn:
-                    for key, value in buffer:
-                        txn.put(key, value)
-
-    def __get_feat_mapper(self, path):
-        feat_cnts = defaultdict(lambda: defaultdict(int))
-        with open(path, 'r') as f:
-            first_flg = self.header
-            for line in f:
-                if first_flg:
-                    first_flg = False
-                    continue
-
-                values = line.rstrip('\n').split(self.sep)
-                if len(values) != self.num_feats + 1:
-                    continue
-
-                for i in range(1, self.num_int_feats + 1):
-                    feat_cnts[i][convert_numeric_feature(values[i])] += 1
-
-                for i in range(self.num_int_feats + 1, self.num_feats + 1):
-                    feat_cnts[i][values[i]] += 1
-
-        feat_mapper = {i: {feat for feat, c in cnt.items() if c >= self.min_threshold} for i, cnt in feat_cnts.items()}
-        feat_mapper = {i: {feat: idx for idx, feat in enumerate(cnt)} for i, cnt in feat_mapper.items()}
-        defaults = {i: len(cnt) for i, cnt in feat_mapper.items()}
-
-        return feat_mapper, defaults
-
-    def __yield_buffer(self, path, feat_mapper, defaults, buffer_size=int(1e5)):
-        item_idx = 0
-        buffer = list()
-        with open(path, 'r') as f:
-            first_flg = self.header
-            for line in f:
-                if first_flg:
-                    first_flg = False
-                    continue
-                values = line.rstrip('\n').split(self.sep)
-                if len(values) != self.num_feats + 1:
-                    continue
-                np_array = np.zeros(self.num_feats + 1, dtype=np.uint32)
-                np_array[0] = int(values[0])
-               
-                for i in range(1, self.num_int_feats + 1):
-                    np_array[i] = feat_mapper[i].get(convert_numeric_feature(values[i]), defaults[i])
-
-                for i in range(self.num_int_feats + 1, self.num_feats + 1):
-                    np_array[i] = feat_mapper[i].get(values[i], defaults[i])
-                buffer.append((struct.pack('>I', item_idx), np_array.tobytes()))
-                item_idx += 1
-                if item_idx % buffer_size == 0:
-                    yield buffer
-                    buffer.clear()
-            yield buffer
-
-
-@lru_cache(maxsize=None)
-def convert_numeric_feature(val: str):
-    if val == '':
-        return 'NULL'
-    v = int(val)
-    if v > 2:
-        return str(int(math.log(v) ** 2))
+def get_ctr_dataset(args):
+    cachepath = os.path.join(args.DATA_DIR, args.dataset, f"bs{args.batch_size}.cache")
+    datapath = f"{args.DATA_DIR}{args.dataset}/{args.dataset}"
+    config = yaml.load(open(os.path.join(args.DATA_DIR, args.dataset, 'config.yaml'), 'r'), Loader=yaml.FullLoader)
+    if os.path.exists(cachepath):
+        with open(cachepath, 'rb') as f:
+            train, val, test = pickle.load(f)
+        return train, val, test, config["feature_stastic"]
     else:
-        return str(v)
+        train = parse_file(datapath + '_train', args, config)
+        val = parse_file(datapath + '_val', args, config)
+        test = parse_file(datapath + '_test', args, config)
+    
+        res = []
+        for record in train:
+            news = {}
+            for k , v in record.items():
+                news[k] = torch.from_numpy(v)
+            res.append(news)
+        train = res
+
+        res = []
+        for record in val:
+            news = {}
+            for k , v in record.items():
+                news[k] = torch.from_numpy(v)
+            res.append(news)
+        val = res
+
+        res = []
+        for record in test:
+            news = {}
+            for k , v in record.items():
+                news[k] = torch.from_numpy(v)
+            res.append(news)
+        test = res
+        
+        with open(cachepath , 'wb') as f:
+            obj = pickle.dumps([train, val, test])
+            f.write(obj)
+        return train, val, test, config["feature_stastic"]
+    
+def parse_file(filename, args, config):
+    import tensorflow as tf
+
+    dataset = tf.data.TextLineDataset(filename)
+    
+    def decoding(record, feature_name, feature_default):
+        data = tf.io.decode_csv(record, feature_default)
+        feature = dict(zip(feature_name, data))
+        label = feature.pop('label')
+        # for ft in ['weekday', 'hour', 'movie_title', 'genre']:
+        #     feature.pop(ft, -1)
+        return feature, label
+    
+    dataset = dataset.map(lambda line : decoding(line, config["feature_stastic"].keys() if 'movie' not in filename else ['user_id', 'item_id', 'label', 'weekday', 'hour', 'age', 'gender', 'occupation','zip_code', 'movie_title', 'release_year', 'genre'], config["feature_defaults"]), num_parallel_calls=10).batch(args.batch_size)
+    
+    Data = []
+    for data in tqdm(dataset.as_numpy_iterator()):
+        record = data[0]
+        record['label'] = data[1].astype(np.float32)
+        Data.append(record)
+    return Data

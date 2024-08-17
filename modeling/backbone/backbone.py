@@ -10,11 +10,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 import scipy.sparse as sp
 from scipy.sparse import csr_matrix
-from fuxictr.pytorch.layers import FeatureEmbedding, MLP_Block, FactorizationMachine, CrossNetV2, CrossNetMix
 
 from .base_model import BaseRec, BaseGCN, BaseCTR
-from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls, sum_emb_out_dim
-from .base_layer import BehaviorAggregator
+from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls
+from .base_layer import BehaviorAggregator, MLP, LR, CrossNetComp
 
 
 """
@@ -399,163 +398,78 @@ class SimpleX(BaseRec):
 """
 CTR Prediction Models
 """
+class FM(BaseCTR):
+    def __init__(self, args, feature_stastic):
+        super().__init__(args, feature_stastic)
+        self.one_order = LR(feature_stastic)
+    
+    def FeatureInteraction(self, dense_input, sparse_input):
+        fm = torch.sum(dense_input, dim=1) ** 2 - torch.sum(dense_input ** 2 , dim=1)
+        self.logits = torch.sum(0.5 * fm, dim=1, keepdim=True) + self.one_order(sparse_input)
+        self.output = torch.sigmoid(self.logits)
+        return self.output
+
+
 class DeepFM(BaseCTR):
-    def __init__(self, 
-                 feature_map, 
-                 model_id="DeepFM", 
-                 gpu=0, 
-                 embedding_dim=10, 
-                 hidden_units=[64, 64, 64], 
-                 hidden_activations="ReLU", 
-                 net_dropout=0, 
-                 batch_norm=False, 
-                 embedding_regularizer=None, 
-                 net_regularizer=None,
-                 **kwargs):
-        super(DeepFM, self).__init__(feature_map, 
-                                     model_id=model_id, 
-                                     gpu=gpu, 
-                                     embedding_regularizer=embedding_regularizer, 
-                                     net_regularizer=net_regularizer,
-                                     **kwargs)
-        self.embedding_dim = embedding_dim
-        self.embedding_layer = FeatureEmbedding(feature_map, embedding_dim)
-        self.fm = FactorizationMachine(feature_map)
-        self.mlp = MLP_Block(input_dim=sum_emb_out_dim(feature_map, embedding_dim),
-                             output_dim=1, 
-                             hidden_units=hidden_units,
-                             hidden_activations=hidden_activations,
-                             output_activation=None, 
-                             dropout_rates=net_dropout, 
-                             batch_norm=batch_norm)
-        self.reset_parameters()
-        self.model_to_device()
-
-    def forward(self, inputs):
-        """
-        Inputs: [X,y]
-        """
-        X = self.get_inputs(inputs)
-        feature_emb = self.embedding_layer(X)
-        logit = self.fm(X, feature_emb)
-        logit += self.mlp(feature_emb.flatten(start_dim=1))
-        return logit
-
-
-class DCNv2(BaseCTR):
-    def __init__(self, 
-                 feature_map, 
-                 model_id="DCNv2", 
-                 gpu=0,
-                 model_structure="parallel",
-                 use_low_rank_mixture=False,
-                 low_rank=32,
-                 num_experts=4,
-                 embedding_dim=10, 
-                 stacked_dnn_hidden_units=[], 
-                 parallel_dnn_hidden_units=[],
-                 dnn_activations="ReLU",
-                 num_cross_layers=3,
-                 net_dropout=0, 
-                 batch_norm=False, 
-                 embedding_regularizer=None,
-                 net_regularizer=None, 
-                 **kwargs):
-        super(DCNv2, self).__init__(feature_map, 
-                                    model_id=model_id, 
-                                    gpu=gpu, 
-                                    embedding_regularizer=embedding_regularizer, 
-                                    net_regularizer=net_regularizer,
-                                    **kwargs)
-        self.embedding_dim = embedding_dim
-        self.embedding_layer = FeatureEmbedding(feature_map, embedding_dim)
-        input_dim = sum_emb_out_dim(feature_map, embedding_dim)
-        if use_low_rank_mixture:
-            self.crossnet = CrossNetMix(input_dim, num_cross_layers, low_rank=low_rank, num_experts=num_experts)
-        else:
-            self.crossnet = CrossNetV2(input_dim, num_cross_layers)
-        self.model_structure = model_structure
-        assert self.model_structure in ["crossnet_only", "stacked", "parallel", "stacked_parallel"], \
-               "model_structure={} not supported!".format(self.model_structure)
-        if self.model_structure in ["stacked", "stacked_parallel"]:
-            self.stacked_dnn = MLP_Block(input_dim=input_dim,
-                                         output_dim=None, # output hidden layer
-                                         hidden_units=stacked_dnn_hidden_units,
-                                         hidden_activations=dnn_activations,
-                                         output_activation=None, 
-                                         dropout_rates=net_dropout,
-                                         batch_norm=batch_norm)
-            final_dim = stacked_dnn_hidden_units[-1]
-        if self.model_structure in ["parallel", "stacked_parallel"]:
-            self.parallel_dnn = MLP_Block(input_dim=input_dim,
-                                          output_dim=None, # output hidden layer
-                                          hidden_units=parallel_dnn_hidden_units,
-                                          hidden_activations=dnn_activations,
-                                          output_activation=None, 
-                                          dropout_rates=net_dropout, 
-                                          batch_norm=batch_norm)
-            final_dim = input_dim + parallel_dnn_hidden_units[-1]
-        if self.model_structure == "stacked_parallel":
-            final_dim = stacked_dnn_hidden_units[-1] + parallel_dnn_hidden_units[-1]
-        if self.model_structure == "crossnet_only": # only CrossNet
-            final_dim = input_dim
-        self.fc = nn.Linear(final_dim, 1)
-        self.reset_parameters()
-        self.model_to_device()
-
-    def forward(self, inputs):
-        X = self.get_inputs(inputs)
-        feature_emb = self.embedding_layer(X, flatten_emb=True)
-        cross_out = self.crossnet(feature_emb)
-        if self.model_structure == "crossnet_only":
-            final_out = cross_out
-        elif self.model_structure == "stacked":
-            final_out = self.stacked_dnn(cross_out)
-        elif self.model_structure == "parallel":
-            dnn_out = self.parallel_dnn(feature_emb)
-            final_out = torch.cat([cross_out, dnn_out], dim=-1)
-        elif self.model_structure == "stacked_parallel":
-            final_out = torch.cat([self.stacked_dnn(cross_out), self.parallel_dnn(feature_emb)], dim=-1)
-        logit = self.fc(final_out)
-        return logit
+    def __init__(self, args, feature_stastic):
+        super().__init__(args, feature_stastic)
+        self.hidden_dims = args.hidden_dims
+        self.dropout = args.dropout
+        self.one_order = LR(feature_stastic)
+        self.mlp = MLP(self.embedding_dim, feature_stastic, self.hidden_dims, self.dropout)
+    
+    def FeatureInteraction(self, dense_input, sparse_input):
+        fm = torch.sum(dense_input, dim=1) ** 2 - torch.sum(dense_input ** 2, dim=1)
+        logits = torch.sum(0.5 * fm, dim=1, keepdim=True) + self.one_order(sparse_input) + self.mlp(dense_input)
+        return logits
 
 
 class DNN(BaseCTR):
-    def __init__(self, 
-                 feature_map, 
-                 model_id="DNN", 
-                 gpu=0, 
-                 embedding_dim=10, 
-                 hidden_units=[64, 64, 64], 
-                 hidden_activations="ReLU", 
-                 net_dropout=0, 
-                 batch_norm=False, 
-                 embedding_regularizer=None, 
-                 net_regularizer=None,
-                 **kwargs):
-        super(DNN, self).__init__(feature_map, 
-                                  model_id=model_id, 
-                                  gpu=gpu, 
-                                  embedding_regularizer=embedding_regularizer, 
-                                  net_regularizer=net_regularizer,
-                                  **kwargs)
-        self.embedding_dim = embedding_dim
-        self.embedding_layer = FeatureEmbedding(feature_map, embedding_dim)
-        self.mlp = MLP_Block(input_dim=sum_emb_out_dim(feature_map, embedding_dim),
-                             output_dim=1, 
-                             hidden_units=hidden_units,
-                             hidden_activations=hidden_activations,
-                             output_activation=None,
-                             dropout_rates=net_dropout,
-                             batch_norm=batch_norm)
-        self.reset_parameters()
-        self.model_to_device()
+    def __init__(self, args, feature_stastic):
+        super().__init__(args, feature_stastic)
+        self.hidden_dims = args.hidden_dims
+        self.dropout = args.dropout
+        self.mlp = MLP(self.embedding_dim, feature_stastic, self.hidden_dims, self.dropout)
     
-    def forward(self, inputs):
-        """
-        Inputs: [X,y]
-        """
-        X = self.get_inputs(inputs)
-        feature_emb = self.embedding_layer(X, flatten_emb=True)
-        logit = self.mlp(feature_emb)
-        return logit
+    def FeatureInteraction(self, dense_input, sparse_input):
+        logits = self.mlp(dense_input)
+        return logits
+
+
+class CrossNet(BaseCTR):
+    def __init__(self, args, feature_stastic):
+        super().__init__(args, feature_stastic)
+        self.depth = args.depth
+        self.crossnet = nn.ModuleList([CrossNetComp(self.embedding_dim, feature_stastic) for i in range(self.depth)])
+        self.linear = nn.Linear((len(feature_stastic) - 1) * self.embedding_dim, 1)
+        nn.init.normal_(self.linear.weight)
+    
+    def FeatureInteraction(self, feature, sparse_input):
+        feature = feature.reshape(feature.shape[0], -1)
+        base = feature
+        cross = feature
+        for i in range(self.depth):
+            cross = self.crossnet[i](base, cross)
+        logits = self.linear(cross)
+        return logits
+
+
+class DCNV2(BaseCTR):
+    def __init__(self, args, feature_stastic):
+        super().__init__(args, feature_stastic)
+        self.hidden_dims = args.hidden_dims
+        self.dropout = args.dropout
+        self.depth = args.depth
+        self.mlp = MLP(self.embedding_dim, feature_stastic, self.hidden_dims, self.dropout)
+        self.crossnet = nn.ModuleList([CrossNetComp(self.embedding_dim, feature_stastic) for i in range(self.depth)])
+        self.linear = nn.Linear((len(feature_stastic) - 1) * self.embedding_dim, 1)
+    
+    def FeatureInteraction(self, feature, sparse_input):
+        mlp = self.mlp(feature)
+        feature = feature.reshape(feature.shape[0], -1)
+        base = feature
+        cross = feature
+        for i in range(self.depth):
+            cross = self.crossnet[i](base, cross)
+        logits = self.linear(cross) + mlp
+        return logits

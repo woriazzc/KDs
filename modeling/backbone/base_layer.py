@@ -217,3 +217,75 @@ class OuterProductNetwork(torch.nn.Module):
             return torch.sum(kp * q, -1)
         else:
             return torch.sum(p * q * self.kernel.unsqueeze(0), -1)
+
+
+class Embedding(nn.Module):
+    def __init__(self, embedding_dim, feature_stastic):
+        super().__init__()
+        self.embedding: nn.ModuleDict[str:nn.Embedding] = nn.ModuleDict()
+        for feature , numb in feature_stastic.items():
+            if feature != 'label':
+                self.embedding[feature] = nn.Embedding(numb + 1, embedding_dim)
+        for _, value in self.embedding.items():
+            nn.init.xavier_uniform_(value.weight)
+
+    def forward(self, data):
+        out = []
+        for name, raw in data.items():
+            if name != 'label':
+                    out.append(self.embedding[name](raw.long().cuda())[:, None, :])
+        return torch.cat(out, dim=-2)
+
+
+class MLP(nn.Module):
+    def __init__(self, embedding_dim, feature_stastic, hidden_dims, dropout, act=None):
+        super().__init__()
+        layers = []
+        Shape = [(len(feature_stastic) - 1) * embedding_dim] + hidden_dims
+        for i in range(0, len(Shape) - 2):
+            hidden = nn.Linear(Shape[i], Shape[i + 1], bias= True)
+            nn.init.normal_(hidden.weight, mean=0, std=0.01)
+            layers.append(hidden)
+            layers.append(nn.Dropout(p=dropout))
+            layers.append(act if act is not None else nn.ReLU(inplace=False))
+        Final = nn.Linear(Shape[-2], Shape[-1], bias=True)
+        nn.init.xavier_normal_(Final.weight, gain=1.414)
+        layers.append(Final)
+        layers.append(nn.Dropout(p=dropout))
+        self.net = nn.Sequential(*layers)
+    
+    def forward(self, x : torch.Tensor):
+        x = x.reshape(x.shape[0], -1)
+        return self.net(x)
+    
+
+class LR(nn.Module):
+    def __init__(self, feature_stastic):
+        super(LR,self).__init__()
+        self.embedding: nn.ModuleDict[str:nn.Embedding] = nn.ModuleDict()
+        for feature, numb in feature_stastic.items():
+            if feature != 'label':
+                self.embedding[feature] = torch.nn.Embedding(numb + 1, 1)
+        
+        for _, value in self.embedding.items():
+            nn.init.xavier_normal_(value.weight)
+    
+    def forward(self, data):
+        out = []
+        for name, raw in data.items():
+            if name != 'label':
+                out.append(self.embedding[name](raw.long().cuda())[:, None, :])
+        out = torch.cat(out, dim=-2)
+        return torch.sum(out, dim=1)
+
+
+class CrossNetComp(nn.Module):
+    def __init__(self, embedding_dim, feature_stastic):
+        super(CrossNetComp, self).__init__()
+        hiddenSize = (len(feature_stastic) - 1) * embedding_dim
+        self.W = nn.Linear(hiddenSize, hiddenSize)
+        nn.init.xavier_normal_(self.W.weight, gain=1.414)
+        
+    def forward(self, base, cross):
+        result = base * self.W(cross) + cross
+        return result
