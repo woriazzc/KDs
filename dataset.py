@@ -10,11 +10,6 @@ from tqdm import tqdm
 from pathlib import Path
 from functools import lru_cache
 from collections import defaultdict
-from fuxictr.features import FeatureMap
-from fuxictr.pytorch.dataloaders import RankDataLoader
-from fuxictr.preprocess import build_dataset
-from fuxictr.datasets.criteo import FeatureProcessor
-from fuxictr.utils import load_dataset_config
 
 import torch
 import torch.nn as nn
