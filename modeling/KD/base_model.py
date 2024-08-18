@@ -74,10 +74,10 @@ class BaseKD4CTR(BaseKD):
     def get_params_to_update(self):
         return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': 0}]
 
-    def forward(self, feature, label):
-        output = self.student(feature)
+    def forward(self, data, label):
+        output = self.student(data)
         base_loss = self.student.get_loss(output, label)
-        kd_loss = self.get_loss(feature, label)
+        kd_loss = self.get_loss(data, label)
         loss = base_loss + self.lmbda * kd_loss
         return loss
 
