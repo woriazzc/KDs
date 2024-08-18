@@ -1137,11 +1137,22 @@ class FitNet(BaseKD4CTR):
         self.model_name = "fitnet"
         self.num_experts = args.fitnet_num_experts
         self.dropout_rate = args.fitnet_dropout_rate
-        self.projectors = Projector(self.student.embedding_dim, self.teacher.embedding_dim, self.num_experts, norm=True, dropout_rate=self.dropout_rate)
+        self.layer = args.fitnet_layer
+        if self.layer == "embedding":
+            self.projectors = Projector(self.student.embedding_dim, self.teacher.embedding_dim, self.num_experts, norm=True, dropout_rate=self.dropout_rate)
+        elif self.layer == "penultimate":
+            self.projectors = Projector(self.student.hidden_dims[-2], self.teacher.linear.weight.shape[0], self.num_experts, norm=True, dropout_rate=self.dropout_rate)
+        else:
+            raise ValueError
     
-    def get_loss(self, feature, label):
-        S_emb = self.student.forward_embed(feature)
-        T_emb = self.teacher.forward_embed(feature)
+    def get_loss(self, data, label):
+        if self.layer == "embedding":
+            S_emb = self.student.forward_embed(data)
+            T_emb = self.teacher.forward_embed(data)
+        elif self.layer == "penultimate":
+            S_emb = self.student.forward_penultimate(data)
+            T_emb = self.teacher.forward_penultimate(data)
+        S_emb = self.projectors(S_emb)
         norm_T = T_emb.pow(2).sum(-1, keepdim=True).pow(1. / 2)
         norm_T = torch.maximum(norm_T, torch.tensor(1e-7, device=norm_T.device))
         T_emb = T_emb.div(norm_T)

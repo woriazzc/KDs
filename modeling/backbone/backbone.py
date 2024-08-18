@@ -405,9 +405,8 @@ class FM(BaseCTR):
     
     def FeatureInteraction(self, dense_input, sparse_input):
         fm = torch.sum(dense_input, dim=1) ** 2 - torch.sum(dense_input ** 2 , dim=1)
-        self.logits = torch.sum(0.5 * fm, dim=1, keepdim=True) + self.one_order(sparse_input)
-        self.output = torch.sigmoid(self.logits)
-        return self.output
+        logits = torch.sum(0.5 * fm, dim=1, keepdim=True) + self.one_order(sparse_input)
+        return logits
 
 
 class DeepFM(BaseCTR):
@@ -434,6 +433,11 @@ class DNN(BaseCTR):
     def FeatureInteraction(self, dense_input, sparse_input):
         logits = self.mlp(dense_input)
         return logits
+    
+    def forward_penultimate(self, sparse_input, dense_input=None):
+        dense_input = self.embedding_layer(sparse_input)
+        logits, feature = self.mlp(dense_input, penultimate=True)
+        return feature
 
 
 class CrossNet(BaseCTR):
@@ -452,6 +456,15 @@ class CrossNet(BaseCTR):
             cross = self.crossnet[i](base, cross)
         logits = self.linear(cross)
         return logits
+
+    def forward_penultimate(self, sparse_input, dense_input=None):
+        feature = self.embedding_layer(sparse_input)
+        feature = feature.reshape(feature.shape[0], -1)
+        base = feature
+        cross = feature
+        for i in range(self.depth):
+            cross = self.crossnet[i](base, cross)
+        return cross
 
 
 class DCNV2(BaseCTR):
@@ -472,4 +485,44 @@ class DCNV2(BaseCTR):
         for i in range(self.depth):
             cross = self.crossnet[i](base, cross)
         logits = self.linear(cross) + mlp
+        return logits
+
+
+class DAGFM(BaseCTR):
+    def __init__(self, args, feature_stastic):
+        super().__init__(args, feature_stastic)
+        self.type = args.type
+        self.depth = args.depth
+        field_num = len(feature_stastic) - 1
+        if type == 'inner':
+            self.p = nn.ParameterList([nn.Parameter(torch.randn(field_num, field_num, self.embedding_dim)) for _ in range(self.depth)])
+        elif type == 'outer':
+            self.p = nn.ParameterList([nn.Parameter(torch.randn(field_num, field_num, self.embedding_dim)) for _ in range(self.depth)])
+            self.q = nn.ParameterList([nn.Parameter(torch.randn(field_num, field_num, self.embedding_dim)) for _ in range(self.depth)])
+            for _ in range(self.depth):
+                nn.init.xavier_normal_(self.p[_], gain=1.414)
+                nn.init.xavier_normal_(self.q[_], gain=1.414)
+        self.adj_matrix = torch.zeros(field_num, field_num, self.embedding_dim).cuda()
+        for i in range(field_num):
+            for j in range(i, field_num):
+                self.adj_matrix[i, j, :] += 1
+        self.connect_layer = nn.Parameter(torch.eye(field_num).float())
+        self.linear = nn.Linear(field_num * (self.depth + 1), 1)
+    
+    def FeatureInteraction(self, feature, sparse_input):
+        init_state = self.connect_layer @ feature
+        h0, ht = init_state, init_state
+        state = [torch.sum(init_state, dim=-1)]
+        for i in range(self.depth):
+            if self.type == 'inner':
+                aggr = torch.einsum('bfd,fsd->bsd', ht, self.p[i] * self.adj_matrix)
+                ht = h0 * aggr
+            elif self.type == 'outer':
+                term = torch.einsum('bfd,fsd->bfs', ht, self.p[i] * self.adj_matrix)
+                aggr = torch.einsum('bfs,fsd->bsd', term, self.q[i])
+                ht = h0 * aggr
+            state.append(torch.sum(ht, -1))
+            
+        state = torch.cat(state, dim=-1)
+        logits = self.linear(state)
         return logits

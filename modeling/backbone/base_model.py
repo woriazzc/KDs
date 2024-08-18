@@ -171,10 +171,10 @@ class BaseCTR(nn.Module):
         self.L2_weight = args.L2
         self.embedding_layer = Embedding(self.embedding_dim, feature_stastic)
     
-    def forward_embed(self, inputs):
+    def forward_embed(self, sparse_input, dense_input=None):
         """Return the output of the embedding layer
         """
-        dense_input = self.embedding_layer(inputs)
+        dense_input = self.embedding_layer(sparse_input)
         return dense_input
 
     def forward(self, sparse_input, dense_input=None):

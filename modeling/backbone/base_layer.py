@@ -248,15 +248,19 @@ class MLP(nn.Module):
             layers.append(hidden)
             layers.append(nn.Dropout(p=dropout))
             layers.append(act if act is not None else nn.ReLU(inplace=False))
-        Final = nn.Linear(Shape[-2], Shape[-1], bias=True)
-        nn.init.xavier_normal_(Final.weight, gain=1.414)
-        layers.append(Final)
-        layers.append(nn.Dropout(p=dropout))
+        self.Final = nn.Linear(Shape[-2], Shape[-1], bias=True)
+        nn.init.xavier_normal_(self.Final.weight, gain=1.414)
+        # layers.append(Final)
         self.net = nn.Sequential(*layers)
     
-    def forward(self, x : torch.Tensor):
+    def forward(self, x : torch.Tensor, penultimate=False):
         x = x.reshape(x.shape[0], -1)
-        return self.net(x)
+        feature = self.net(x)
+        ret = self.Final(feature)
+        if penultimate:
+            return ret, feature
+        else:
+            return ret
     
 
 class LR(nn.Module):
