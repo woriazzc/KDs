@@ -405,9 +405,8 @@ class FM(BaseCTR):
     
     def FeatureInteraction(self, dense_input, sparse_input):
         fm = torch.sum(dense_input, dim=1) ** 2 - torch.sum(dense_input ** 2 , dim=1)
-        self.logits = torch.sum(0.5 * fm, dim=1, keepdim=True) + self.one_order(sparse_input)
-        self.output = torch.sigmoid(self.logits)
-        return self.output
+        logits = torch.sum(0.5 * fm, dim=1, keepdim=True) + self.one_order(sparse_input)
+        return logits
 
 
 class DeepFM(BaseCTR):
