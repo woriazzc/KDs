@@ -13,7 +13,7 @@ from scipy.sparse import csr_matrix
 
 from .base_model import BaseRec, BaseGCN, BaseCTR
 from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls
-from .base_layer import BehaviorAggregator, MLP, LR, CrossNetComp
+from .base_layer import BehaviorAggregator, MLP, LR, CrossNetComp, CINComp
 
 
 """
@@ -533,4 +533,67 @@ class DAGFM(BaseCTR):
             
         state = torch.cat(state, dim=-1)
         logits = self.linear(state)
+        return logits
+
+
+class CIN(BaseCTR):
+    def __init__(self, args, feature_stastic):
+        super().__init__(args, feature_stastic)
+        self.cin_dims = args.cin_dims
+        self.cinlist = [len(feature_stastic) - 1] + self.cin_dims
+        self.cin = nn.ModuleList([CINComp(self.cinlist[i], self.cinlist[i + 1], feature_stastic) for i in range(0, len(self.cinlist) - 1)])
+        self.linear = nn.Linear(torch.zeros(sum(self.cinlist) - self.cinlist[0], 1))
+        nn.init.normal_(self.linear.weight, mean=0, std=0.01)
+    
+    def FeatureInteraction(self, feature, sparse_input):
+        base = feature
+        x = feature
+        p = []
+        for comp in self.cin:
+            x = comp(x, base)
+            p.append(torch.sum(x, dim=-1))
+        p = torch.cat(p, dim=-1)
+        logits = self.linear(p)
+        return logits
+    
+    @property
+    def _penultimate_dim(self):
+        return self.linear.weight.shape[0]
+
+    def forward_penultimate(self, sparse_input, dense_input=None):
+        feature = self.embedding_layer(sparse_input)
+        base = feature
+        x = feature
+        p = []
+        for comp in self.cin:
+            x = comp(x, base)
+            p.append(torch.sum(x, dim=-1))
+        p = torch.cat(p, dim=-1)
+        return p
+
+
+class XDeepFM(BaseCTR):
+    def __init__(self, args, feature_stastic):
+        super().__init__(args, feature_stastic)
+        self.hidden_dims = args.hidden_dims
+        self.dropout = args.dropout
+        self.cin_dims = args.cin_dims
+        self.mlp = MLP(self.embedding_dim, feature_stastic, self.hidden_dims, self.dropout)
+        self.one_order = LR(feature_stastic)
+        self.cinlist = [len(feature_stastic) - 1] + self.cin_dims
+        self.cin = nn.ModuleList([CINComp(self.cinlist[i], self.cinlist[i + 1], feature_stastic) for i in range(0, len(self.cinlist) - 1)])
+        self.linear = nn.Linear(sum(self.cinlist) - self.cinlist[0], 1)
+        nn.init.normal_(self.linear.weight, mean=0, std=0.01)
+
+    def FeatureInteraction(self, feature, sparse_input):
+        mlp = self.mlp(feature)
+        base = feature
+        x = feature
+        p = []
+        for comp in self.cin:
+            x = comp(x, base)
+            p.append(torch.sum(x, dim=-1))
+        p = torch.cat(p, dim=-1)
+        cin = self.linear(p)
+        logits = cin + mlp + self.one_order(sparse_input)
         return logits

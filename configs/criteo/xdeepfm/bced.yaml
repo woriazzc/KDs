@@ -1,0 +1,4 @@
+epochs: 1000
+batch_size: 10000
+lr: 1.e-3
+lmbda: 50.0

@@ -1,0 +1,9 @@
+epochs: 1000
+batch_size: 10000
+lr: 1.e-3
+lmbda: 0.01
+
+fitnet_num_experts: 5
+fitnet_dropout_rate: 0.2
+fitnet_layer: penultimate
+fitnet_norm: False

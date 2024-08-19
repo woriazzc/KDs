@@ -223,7 +223,7 @@ class Embedding(nn.Module):
     def __init__(self, embedding_dim, feature_stastic):
         super().__init__()
         self.embedding: nn.ModuleDict[str:nn.Embedding] = nn.ModuleDict()
-        for feature , numb in feature_stastic.items():
+        for feature, numb in feature_stastic.items():
             if feature != 'label':
                 self.embedding[feature] = nn.Embedding(numb + 1, embedding_dim)
         for _, value in self.embedding.items():
@@ -293,3 +293,16 @@ class CrossNetComp(nn.Module):
     def forward(self, base, cross):
         result = base * self.W(cross) + cross
         return result
+
+
+class CINComp(nn.Module):
+    def __init__(self, indim, outdim, feature_stastic):
+        super(CINComp, self).__init__()
+        basedim = len(feature_stastic) - 1
+        self.conv = nn.Conv1d(indim * basedim, outdim, 1)
+    
+    def forward(self, infeature, base):
+        return self.conv(
+            (infeature[:, :, None, :] * base[:, None, :, :]) \
+            .reshape(infeature.shape[0], infeature.shape[1] * base.shape[1], -1)
+        )
