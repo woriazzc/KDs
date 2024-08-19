@@ -5,3 +5,5 @@ lmbda: 0.01
 
 fitnet_num_experts: 5
 fitnet_dropout_rate: 0.2
+fitnet_layer: "embedding"
+fitnet_norm: False
