@@ -70,7 +70,7 @@ def main(args):
         logger.log("Model's personal time...")
         model.do_something_in_each_epoch(epoch)
 
-        epoch_loss = []
+        epoch_loss, epoch_base_loss, epoch_kd_loss = [], [], []
         logger.log('Training...')
 
         iterator = train_loader if args.no_log else tqdm(train_loader)
@@ -79,15 +79,19 @@ def main(args):
             
             # Forward Pass
             model.train()
-            loss = model(data, label)
+            loss, base_loss, kd_loss = model(data, label)
 
             # Backward and optimize
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            epoch_loss.append(loss)
+            epoch_loss.append(loss.detach())
+            epoch_base_loss.append(base_loss)
+            epoch_kd_loss.append(kd_loss)
 
         epoch_loss = torch.mean(torch.stack(epoch_loss)).item()
+        epoch_base_loss = torch.mean(torch.stack(epoch_base_loss)).item()
+        epoch_kd_loss = torch.mean(torch.stack(epoch_kd_loss)).item()
 
         toc1 = time.time()
         
@@ -95,7 +99,7 @@ def main(args):
         if epoch % args.eval_period == 0:
             logger.log("Evaluating...")
             is_improved, early_stop, eval_results, elapsed = evaluator.evaluate_while_training(model, epoch, train_loader, valid_loader, test_loader)
-            evaluator.print_result_while_training(logger, epoch_loss, eval_results, is_improved=is_improved, train_time=toc1-tic1, test_time=elapsed)
+            evaluator.print_result_while_training(logger, epoch_loss, epoch_base_loss, epoch_kd_loss, eval_results, is_improved=is_improved, train_time=toc1-tic1, test_time=elapsed)
             if early_stop:
                 break
             if is_improved:

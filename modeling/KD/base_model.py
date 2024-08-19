@@ -61,7 +61,7 @@ class BaseKD4Rec(BaseKD):
         base_loss = self.student.get_loss(output)
         kd_loss = self.get_loss(batch_user, batch_pos_item, batch_neg_item)
         loss = base_loss + self.lmbda * kd_loss
-        return loss
+        return loss, base_loss.detach(), kd_loss.detach()
     
     def get_ratings(self, batch_user):
         return self.student.get_ratings(batch_user)
@@ -79,7 +79,7 @@ class BaseKD4CTR(BaseKD):
         base_loss = self.student.get_loss(output, label)
         kd_loss = self.get_loss(data, label)
         loss = base_loss + self.lmbda * kd_loss
-        return loss
+        return loss, base_loss.detach(), kd_loss.detach()
 
     def get_ratings(self, data):
         return self.student(data)

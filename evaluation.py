@@ -178,12 +178,14 @@ class Evaluator:
 
             return is_improved, early_stop, eval_results, toc-tic
 
-    def print_result_while_training(self, logger, train_loss, eval_results, is_improved=False, train_time=0., test_time=0.):
+    def print_result_while_training(self, logger, train_loss, base_loss, kd_loss, eval_results, is_improved=False, train_time=0., test_time=0.):
         """print evaluation results while training
 
         Parameters
         ----------
-        train_loss : float
+        train_loss : total loss, float
+        base_loss : base (CTR, Rec) model loss, float
+        kd_loss : KD model loss, float
         eval_results : dict
             summarizes the evaluation results
         is_improved : bool, optional
@@ -193,7 +195,7 @@ class Evaluator:
         test_time : float, optional
             elapsed time for test, by default 0.
         """
-        logger.log('\tTrain Loss: {:.4f}, Elapsed: train {:.2f} test {:.2f}{}'.format(train_loss, train_time, test_time, " *" if is_improved else ""))
+        logger.log('\tTrain Loss: {:.4f} (base: {:.4f}, kd: {:.4f}), Elapsed: train {:.2f} test {:.2f}{}'.format(train_loss, base_loss, kd_loss, train_time, test_time, " *" if is_improved else ""))
 
         for mode in ['valid', 'test']:
             logger.log('\t', mode, end='')
