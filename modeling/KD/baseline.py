@@ -50,7 +50,7 @@ class Scratch(nn.Module):
             output = self.backbone(*params)
             base_loss = self.backbone.get_loss(output)
         loss = base_loss
-        return loss
+        return loss, base_loss.detach(), torch.tensor(0.)
 
     @property
     def param_to_save(self):
