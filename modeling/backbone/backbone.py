@@ -434,6 +434,10 @@ class DNN(BaseCTR):
         logits = self.mlp(dense_input)
         return logits
     
+    @property
+    def _penultimate_dim(self):
+        return self.hidden_dims[-2]
+    
     def forward_penultimate(self, sparse_input, dense_input=None):
         dense_input = self.embedding_layer(sparse_input)
         logits, feature = self.mlp(dense_input, penultimate=True)
@@ -456,6 +460,10 @@ class CrossNet(BaseCTR):
             cross = self.crossnet[i](base, cross)
         logits = self.linear(cross)
         return logits
+
+    @property
+    def _penultimate_dim(self):
+        return self.linear.weight.shape[0]
 
     def forward_penultimate(self, sparse_input, dense_input=None):
         feature = self.embedding_layer(sparse_input)
