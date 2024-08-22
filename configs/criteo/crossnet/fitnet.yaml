@@ -3,7 +3,6 @@ batch_size: 10000
 lr: 1.e-3
 lmbda: 10
 
-fitnet_num_experts: 5
-fitnet_dropout_rate: 0.2
 fitnet_layer: penultimate
-fitnet_norm: False
+fitnet_warm_up: 2
+fitnet_beta: 1.0

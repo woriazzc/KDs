@@ -131,7 +131,7 @@ if __name__ == '__main__':
     logger = Logger(args, args.no_log)
     args.task = 'ctr'
     args.early_stop_metric = "AUC"
-    args.early_stop_patience = 3
+    args.early_stop_patience = 2
 
     if args.run_all:
         args_copy = deepcopy(args)
