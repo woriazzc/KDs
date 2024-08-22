@@ -486,6 +486,10 @@ class DCNV2(BaseCTR):
         self.crossnet = nn.ModuleList([CrossNetComp(self.embedding_dim, feature_stastic) for i in range(self.depth)])
         self.linear = nn.Linear((len(feature_stastic) - 1) * self.embedding_dim, 1)
     
+    @property
+    def _penultimate_dim(self):
+        return self.linear.weight.shape[1], self.hidden_dims[-2]
+    
     def FeatureInteraction(self, feature, sparse_input):
         mlp = self.mlp(feature)
         feature = feature.reshape(feature.shape[0], -1)
@@ -493,8 +497,17 @@ class DCNV2(BaseCTR):
         cross = feature
         for i in range(self.depth):
             cross = self.crossnet[i](base, cross)
-        logits = self.linear(cross) + mlp
-        return logits
+        return self.linear(cross)
+    
+    def forward_penultimate(self, sparse_input, dense_input=None):
+        dense_input = self.embedding_layer(sparse_input)
+        logits, feature = self.mlp(dense_input, penultimate=True)
+        dense_input = dense_input.reshape(dense_input.shape[0], -1)
+        base = dense_input
+        cross = dense_input
+        for i in range(self.depth):
+            cross = self.crossnet[i](base, cross)
+        return cross, feature
 
 
 class DAGFM(BaseCTR):
