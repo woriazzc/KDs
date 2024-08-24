@@ -81,7 +81,7 @@ class Embedding(nn.Module):
 
 
 class MLP(nn.Module):
-    def __init__(self, embedding_dim, feature_stastic, hidden_dims, dropout, act=None):
+    def __init__(self, embedding_dim, feature_stastic, hidden_dims, dropout):
         super().__init__()
         layers = []
         Shape = [(len(feature_stastic) - 1) * embedding_dim] + hidden_dims
@@ -90,16 +90,21 @@ class MLP(nn.Module):
             nn.init.normal_(hidden.weight, mean=0, std=0.01)
             layers.append(hidden)
             layers.append(nn.Dropout(p=dropout))
-            layers.append(act if act is not None else nn.ReLU(inplace=False))
+            layers.append(nn.ReLU(inplace=False))
         self.Final = nn.Linear(Shape[-2], Shape[-1], bias=True)
         nn.init.xavier_normal_(self.Final.weight, gain=1.414)
-        # layers.append(Final)
-        self.net = nn.Sequential(*layers)
+        self.net = nn.ModuleList(layers)
     
-    def forward(self, x : torch.Tensor, penultimate=False):
-        x = x.reshape(x.shape[0], -1)
-        feature = self.net(x)
+    def forward(self, x : torch.Tensor, penultimate=False, return_all=False):
+        feature = x.reshape(x.shape[0], -1)
+        all_features = []
+        for layer in self.net:
+            feature = layer(feature)
+            if isinstance(layer, nn.ReLU):
+                all_features.append(feature)
         ret = self.Final(feature)
+        if return_all:
+            return all_features
         if penultimate:
             return ret, feature
         else:

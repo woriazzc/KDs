@@ -443,6 +443,12 @@ class DNN(BaseCTR):
         logits, feature = self.mlp(dense_input, penultimate=True)
         return feature
 
+    def forward_all_feature(self, sparse_input, dense_input=None):
+        dense_input = self.embedding_layer(sparse_input)
+        all_features = [dense_input.reshape(dense_input.shape[0], -1)]
+        all_features += self.mlp(dense_input, return_all=True)
+        return all_features
+
 
 class CrossNet(BaseCTR):
     def __init__(self, args, feature_stastic):
@@ -474,6 +480,17 @@ class CrossNet(BaseCTR):
         for i in range(self.depth):
             cross = self.crossnet[i](base, cross)
         return cross
+    
+    def forward_all_feature(self, sparse_input, dense_input=None):
+        feature = self.embedding_layer(sparse_input)
+        feature = feature.reshape(feature.shape[0], -1)
+        base = feature
+        cross = feature
+        all_features = [cross]
+        for i in range(self.depth):
+            cross = self.crossnet[i](base, cross)
+            all_features.append(cross)
+        return all_features
 
 
 class DCNV2(BaseCTR):
