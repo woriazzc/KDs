@@ -573,7 +573,7 @@ class CIN(BaseCTR):
         self.cin_dims = args.cin_dims
         self.cinlist = [len(feature_stastic) - 1] + self.cin_dims
         self.cin = nn.ModuleList([CINComp(self.cinlist[i], self.cinlist[i + 1], feature_stastic) for i in range(0, len(self.cinlist) - 1)])
-        self.linear = nn.Linear(torch.zeros(sum(self.cinlist) - self.cinlist[0], 1))
+        self.linear = nn.Linear(sum(self.cinlist) - self.cinlist[0], 1)
         nn.init.normal_(self.linear.weight, mean=0, std=0.01)
     
     def FeatureInteraction(self, feature, sparse_input):
