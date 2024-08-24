@@ -9,7 +9,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph
+from .utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph, CKA
 from .base_model import BaseKD4Rec, BaseKD4CTR
 from .baseline import DE
 
@@ -1131,61 +1131,37 @@ class CLID(BaseKD4CTR):
         return loss
 
 
-class FitNet(BaseKD4CTR):
+class HetD(BaseKD4CTR):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
-        self.model_name = "fitnet"
-        self.layer = args.fitnet_layer
-        self.warm_up = args.fitnet_warm_up
-        self.beta = args.fitnet_beta
+        self.model_name = "hetd"
+        self.beta = args.hetd_beta
+        self.gamma = args.hetd_gamma
         self.lmbda = args.lmbda
-        self.ablation = args.ablation
-        if self.layer == "embedding":
-            self.projector = nn.Linear(self.student.embedding_dim, self.teacher.embedding_dim)
-        elif self.layer == "penultimate":
-            if isinstance(self.teacher._penultimate_dim, int):
-                teacher_penultimate_dim = self.teacher._penultimate_dim
-                student_penultimate_dim = self.student._penultimate_dim
-                self.projector = nn.Linear(student_penultimate_dim, teacher_penultimate_dim)
-                self.adaptor = nn.Linear(teacher_penultimate_dim, teacher_penultimate_dim)
-                self.predictor = nn.Linear(teacher_penultimate_dim, 1)
-            else:
-                cross_dim, deep_dim = self.teacher._penultimate_dim
-                student_penultimate_dim = self.student._penultimate_dim
-                self.projector_cross = nn.Linear(student_penultimate_dim, cross_dim)
-                self.projector_deep = nn.Linear(student_penultimate_dim, deep_dim)
+
+        student_penultimate_dim = self.student._penultimate_dim
+        if isinstance(self.teacher._penultimate_dim, int):
+            # For one-stream models
+            teacher_penultimate_dim = self.teacher._penultimate_dim
         else:
-            raise ValueError
-        
-    def do_something_in_each_epoch(self, epoch):
-        self.epoch = epoch
-        return
+            # For two-stream models
+            cross_dim, deep_dim = self.teacher._penultimate_dim
+            teacher_penultimate_dim = cross_dim + deep_dim
+        self.projector = nn.Linear(student_penultimate_dim, teacher_penultimate_dim)
+        self.adaptor = nn.Linear(teacher_penultimate_dim, teacher_penultimate_dim)
+        self.predictor = nn.Linear(teacher_penultimate_dim, 1)
     
     def get_loss(self, data, label):
-        if self.layer == "embedding":
-            S_emb = self.student.forward_embed(data)
-            T_emb = self.teacher.forward_embed(data)
-        elif self.layer == "penultimate":
-            S_emb = self.student.forward_penultimate(data)
-            T_emb = self.teacher.forward_penultimate(data)
-            
-        if isinstance(self.teacher._penultimate_dim, int):
-            S_emb = self.projector(S_emb)
-            if self.ablation:
-                loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean()
-                return loss
-        else:
-            S_emb_cross = self.projector_cross(S_emb)
-            S_emb_deep = self.projector_deep(S_emb)
+        S_emb = self.student.forward_penultimate(data)
+        T_emb = self.teacher.forward_penultimate(data)
+        if isinstance(self.teacher._penultimate_dim, tuple):
+            # Two-stream models
             T_emb_cross, T_emb_deep = T_emb
-            if self.ablation:
-                loss = (T_emb_cross.detach() - S_emb_cross).pow(2).sum(-1).mean() * 0.5 + (T_emb_deep.detach() - S_emb_deep).pow(2).sum(-1).mean() * 0.5
-                return loss
+            T_emb = torch.cat([T_emb_cross, T_emb_deep], dim=-1)
+        S_emb = self.projector(S_emb)
         T_emb = self.adaptor(T_emb)
         T_logits = self.predictor(T_emb)
         S_pred = torch.sigmoid(self.student(data))
         loss_adaptor = F.binary_cross_entropy_with_logits(T_logits.squeeze(-1), label.squeeze(-1).float()) + self.beta * F.binary_cross_entropy_with_logits(T_logits.squeeze(-1), S_pred.detach().squeeze(-1))
-        if self.epoch < self.warm_up:
-            return (T_emb.detach() - S_emb).pow(2).sum(-1).mean() + loss_adaptor / self.lmbda
-        loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean()
+        loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean() + loss_adaptor / self.lmbda * self.gamma
         return loss

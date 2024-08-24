@@ -1,6 +1,6 @@
 epochs: 1000
 batch_size: 10000
 lr: 1.e-3
-lmbda: 10
+lmbda: 1
 
-fitnet_layer: penultimate
+rkd_K: 1024

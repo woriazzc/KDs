@@ -1,5 +1,6 @@
 import os
 import pickle
+import numpy as np
 
 import torch
 import torch.nn as nn
@@ -111,3 +112,20 @@ class Projector(nn.Module):
     def forward(self, x, reduction=True):
         fea = self.forward_experts(x, self.experts, reduction)
         return fea
+
+
+@torch.no_grad()
+def CKA(X, Y):
+    def HSCI(K, L):
+        n = K.shape[0]
+        H = torch.eye(n, device=K.device) - 1. / n * torch.ones((n, n), device=K.device)
+        KH = torch.mm(K, H)
+        LH = torch.mm(L, H)
+        hsci = 1. / ((n - 1) ** 2) * torch.trace(torch.mm(KH, LH))
+        return hsci
+    K = torch.mm(X, X.T)
+    L = torch.mm(Y, Y.T)
+    hsci = HSCI(K, L)
+    varK = torch.sqrt(HSCI(K, K))
+    varL = torch.sqrt(HSCI(L, L))
+    return hsci / (varK * varL)

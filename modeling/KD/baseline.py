@@ -9,8 +9,8 @@ import torch.nn as nn
 import torch.utils.data as data
 import torch.nn.functional as F
 
-from .utils import Expert
-from .base_model import BaseKD4Rec
+from .utils import Expert, CKA
+from .base_model import BaseKD4Rec, BaseKD4CTR
 
 
 class Scratch(nn.Module):
@@ -945,3 +945,85 @@ class HetComp(BaseKD4Rec):
         kd_loss = self.get_loss(batch_user)
         loss = self.lmbda * kd_loss
         return loss
+
+
+class FitNet(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "fitnet"
+        self.layer = args.fitnet_layer
+        if self.layer == "embedding":
+            self.projector = nn.Linear(self.student.embedding_dim, self.teacher.embedding_dim)
+        elif self.layer == "penultimate":
+            if isinstance(self.teacher._penultimate_dim, int):
+                # For one-stream models
+                teacher_penultimate_dim = self.teacher._penultimate_dim
+                student_penultimate_dim = self.student._penultimate_dim
+                self.projector = nn.Linear(student_penultimate_dim, teacher_penultimate_dim)
+            else:
+                # For two-stream models
+                cross_dim, deep_dim = self.teacher._penultimate_dim
+                student_penultimate_dim = self.student._penultimate_dim
+                self.projector_cross = nn.Linear(student_penultimate_dim, cross_dim)
+                self.projector_deep = nn.Linear(student_penultimate_dim, deep_dim)
+        elif self.layer == "all":
+            self.cka = None
+            self.cnt = 0
+        else:
+            raise ValueError
+        
+    def do_something_in_each_epoch(self, epoch):
+        if self.layer == "all":
+            if self.cka is not None:
+                print(self.cka)
+                self.cka = None
+                self.cnt = 0
+    
+    def get_loss(self, data, label):
+        if self.layer == "embedding":
+            S_emb = self.student.forward_embed(data)
+            T_emb = self.teacher.forward_embed(data)
+            S_emb = self.projector(S_emb)
+            loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean()
+            return loss
+        elif self.layer == "penultimate":
+            S_emb = self.student.forward_penultimate(data)
+            T_emb = self.teacher.forward_penultimate(data)
+            if isinstance(self.teacher._penultimate_dim, int):
+                S_emb = self.projector(S_emb)
+                loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean()
+                return loss
+            else:
+                S_emb_cross = self.projector_cross(S_emb)
+                S_emb_deep = self.projector_deep(S_emb)
+                T_emb_cross, T_emb_deep = T_emb
+                loss = (T_emb_cross.detach() - S_emb_cross).pow(2).sum(-1).mean() * 0.5 + (T_emb_deep.detach() - S_emb_deep).pow(2).sum(-1).mean() * 0.5
+                return loss
+        elif self.layer == "all":
+            S_embs = self.student.forward_all_feature(data)
+            T_embs = self.teacher.forward_all_feature(data)
+            CKA_mat = np.zeros((len(T_embs), len(S_embs)))
+            for id_T, T_emb in enumerate(T_embs):
+                for id_S, S_emb in enumerate(S_embs):
+                    CKA_mat[id_T, id_S] = CKA(T_emb, S_emb).item()
+            if self.cka is None:
+                self.cka = CKA_mat
+            else:
+                self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
+                self.cnt += 1
+            return torch.tensor(0).cuda()
+        else: raise ValueError
+
+
+class RKD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "rkd"
+        self.K = args.rkd_K
+
+    def get_loss(self, data, label):
+        S_emb = self.student.forward_penultimate(data)[:self.K]
+        T_emb = self.teacher.forward_penultimate(data)[:self.K]
+        S_mat = S_emb.mm(S_emb.T)
+        T_mat = T_emb.mm(T_emb.T)
+        return (S_mat - T_mat).pow(2).mean()

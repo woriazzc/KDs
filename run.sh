@@ -80,18 +80,23 @@ python -u main.py --dataset=yelp --backbone=bpr --model=rrd
 For CTR Prediction Models
 """
 # train teacher
-python -u main_ctr.py --dataset=criteo --backbone=deepfm --train_teacher --suffix teacher
+python -u main_ctr.py --dataset=criteo --backbone=crossnet --train_teacher --suffix teacher
+python -u main_ctr.py --dataset=criteo --backbone=dnn --train_teacher --suffix teacher
 python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --train_teacher --suffix teacher
 
 # from scratch
-python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=scratch --suffix student
+python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=scratch --suffix student
+python -u main_ctr.py --dataset=criteo --backbone=dnn --model=scratch --suffix student
 python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=scratch --suffix student
 
 # KD
-python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=bced
-python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=clid
-python -u main_ctr.py --dataset=criteo --backbone=deepfm --model=fitnet
+python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=hetd
+python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=rkd
+python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=bced
+
+python -u main_ctr.py --dataset=criteo --backbone=dnn --model=bced
+python -u main_ctr.py --dataset=criteo --backbone=dnn --model=fitnet
 
 python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=bced
 python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=clid
-python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=fitnet
+python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=hetd
