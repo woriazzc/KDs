@@ -952,6 +952,7 @@ class FitNet(BaseKD4CTR):
         super().__init__(args, teacher, student)
         self.model_name = "fitnet"
         self.layer = args.fitnet_layer
+        self.verbose = args.verbose
         if self.layer == "embedding":
             self.projector = nn.Linear(self.student.embedding_dim, self.teacher.embedding_dim)
         elif self.layer == "penultimate":
@@ -966,16 +967,17 @@ class FitNet(BaseKD4CTR):
                 student_penultimate_dim = self.student._penultimate_dim
                 self.projector_cross = nn.Linear(student_penultimate_dim, cross_dim)
                 self.projector_deep = nn.Linear(student_penultimate_dim, deep_dim)
-        elif self.layer == "all":
-            self.cka = None
-            self.cnt = 0
+        elif self.layer == "none":
+            pass
         else:
             raise ValueError
+        if self.verbose:
+            self.cka = None
+            self.cnt = 0
         
     def do_something_in_each_epoch(self, epoch):
-        if self.layer == "all":
+        if self.verbose:
             if self.cka is not None:
-                print(self.cka)
                 self.cka = None
                 self.cnt = 0
     
@@ -985,21 +987,23 @@ class FitNet(BaseKD4CTR):
             T_emb = self.teacher.forward_embed(data)
             S_emb = self.projector(S_emb)
             loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean()
-            return loss
         elif self.layer == "penultimate":
             S_emb = self.student.forward_penultimate(data)
             T_emb = self.teacher.forward_penultimate(data)
             if isinstance(self.teacher._penultimate_dim, int):
                 S_emb = self.projector(S_emb)
                 loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean()
-                return loss
             else:
                 S_emb_cross = self.projector_cross(S_emb)
                 S_emb_deep = self.projector_deep(S_emb)
                 T_emb_cross, T_emb_deep = T_emb
                 loss = (T_emb_cross.detach() - S_emb_cross).pow(2).sum(-1).mean() * 0.5 + (T_emb_deep.detach() - S_emb_deep).pow(2).sum(-1).mean() * 0.5
-                return loss
-        elif self.layer == "all":
+        elif self.layer == "none":
+            loss = torch.tensor(0.).cuda()
+        else: raise ValueError
+
+        if self.verbose:
+            # calculate CKA
             S_embs = self.student.forward_all_feature(data)
             T_embs = self.teacher.forward_all_feature(data)
             CKA_mat = np.zeros((len(T_embs), len(S_embs)))
@@ -1011,8 +1015,9 @@ class FitNet(BaseKD4CTR):
             else:
                 self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
                 self.cnt += 1
-            return torch.tensor(0).cuda()
-        else: raise ValueError
+                if self.cnt % 50 == 0:
+                    print(self.cka)
+        return loss
 
 
 class RKD(BaseKD4CTR):
