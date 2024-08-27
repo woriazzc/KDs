@@ -971,15 +971,13 @@ class FitNet(BaseKD4CTR):
             pass
         else:
             raise ValueError
-        if self.verbose:
-            self.cka = None
-            self.cnt = 0
         
     def do_something_in_each_epoch(self, epoch):
         if self.verbose:
-            if self.cka is not None:
-                self.cka = None
-                self.cnt = 0
+            if epoch > 0 and not self.cka is None:
+                print(self.cka)
+            self.cka = None
+            self.cnt = 0
     
     def get_loss(self, data, label):
         if self.layer == "embedding":
@@ -1002,21 +1000,20 @@ class FitNet(BaseKD4CTR):
             loss = torch.tensor(0.).cuda()
         else: raise ValueError
 
-        if self.verbose:
+        if self.verbose and self.cnt < 5:
             # calculate CKA
-            S_embs = self.student.forward_all_feature(data)
-            T_embs = self.teacher.forward_all_feature(data)
-            CKA_mat = np.zeros((len(T_embs), len(S_embs)))
-            for id_T, T_emb in enumerate(T_embs):
-                for id_S, S_emb in enumerate(S_embs):
-                    CKA_mat[id_T, id_S] = CKA(T_emb, S_emb).item()
-            if self.cka is None:
-                self.cka = CKA_mat
-            else:
-                self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
-                self.cnt += 1
-                if self.cnt % 50 == 0:
-                    print(self.cka)
+            with torch.no_grad():
+                S_embs = self.student.forward_all_feature(data)
+                T_embs = self.teacher.forward_all_feature(data)
+                CKA_mat = np.zeros((len(T_embs), len(S_embs)))
+                for id_T, T_emb in enumerate(T_embs):
+                    for id_S, S_emb in enumerate(S_embs):
+                        CKA_mat[id_T, id_S] = CKA(T_emb, S_emb).item()
+                if self.cka is None:
+                    self.cka = CKA_mat
+                else:
+                    self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
+                    self.cnt += 1
         return loss
 
 

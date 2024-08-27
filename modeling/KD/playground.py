@@ -1138,6 +1138,7 @@ class HetD(BaseKD4CTR):
         self.beta = args.hetd_beta
         self.gamma = args.hetd_gamma
         self.lmbda = args.lmbda
+        self.verbose = args.verbose
 
         student_penultimate_dim = self.student._penultimate_dim
         if isinstance(self.teacher._penultimate_dim, int):
@@ -1151,6 +1152,13 @@ class HetD(BaseKD4CTR):
         self.adaptor = nn.Linear(teacher_penultimate_dim, teacher_penultimate_dim)
         self.predictor = nn.Linear(teacher_penultimate_dim, 1)
     
+    def do_something_in_each_epoch(self, epoch):
+        if self.verbose:
+            if epoch > 0 and not self.cka is None:
+                print(self.cka)
+            self.cka = None
+            self.cnt = 0
+    
     def get_loss(self, data, label):
         S_emb = self.student.forward_penultimate(data)
         T_emb = self.teacher.forward_penultimate(data)
@@ -1163,5 +1171,22 @@ class HetD(BaseKD4CTR):
         T_logits = self.predictor(T_emb)
         S_pred = torch.sigmoid(self.student(data))
         loss_adaptor = F.binary_cross_entropy_with_logits(T_logits.squeeze(-1), label.squeeze(-1).float()) + self.beta * F.binary_cross_entropy_with_logits(T_logits.squeeze(-1), S_pred.detach().squeeze(-1))
-        loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean() + loss_adaptor / self.lmbda * self.gamma
+        loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean() + loss_adaptor / (self.lmbda + 1e-8) * self.gamma
+
+        if self.verbose and self.cnt < 5:
+            # calculate CKA
+            with torch.no_grad():
+                S_embs = self.student.forward_all_feature(data)
+                T_embs = self.teacher.forward_all_feature(data)
+                T_embs += [T_emb.detach()]
+                CKA_mat = np.zeros((len(T_embs), len(S_embs)))
+                for id_T, T_emb in enumerate(T_embs):
+                    for id_S, S_emb in enumerate(S_embs):
+                        CKA_mat[id_T, id_S] = CKA(T_emb, S_emb).item()
+                if self.cka is None:
+                    self.cka = CKA_mat
+                else:
+                    self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
+                    self.cnt += 1
+        
         return loss
