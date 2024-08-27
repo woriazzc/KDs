@@ -459,9 +459,9 @@ class CrossNet(BaseCTR):
         nn.init.normal_(self.linear.weight)
     
     def FeatureInteraction(self, feature, sparse_input):
-        feature = feature.reshape(feature.shape[0], -1)
-        base = feature
-        cross = feature
+        features = feature.reshape(feature.shape[0], -1)
+        base = features
+        cross = features
         for i in range(self.depth):
             cross = self.crossnet[i](base, cross)
         logits = self.linear(cross)
@@ -638,3 +638,15 @@ class XDeepFM(BaseCTR):
         cin = self.linear(p)
         logits = cin + mlp + self.one_order(sparse_input)
         return logits
+
+
+class CrossCIN(BaseCTR):
+    def __init__(self, args, feature_stastic):
+        super().__init__(args, feature_stastic)
+        self.crossnet = CrossNet(args, feature_stastic)
+        self.cin = CIN(args, feature_stastic)
+    
+    def FeatureInteraction(self, feature, sparse_input):
+        logits_crossnet = self.crossnet.FeatureInteraction(feature, sparse_input)
+        logits_cin = self.cin.FeatureInteraction(feature, sparse_input)
+        return logits_crossnet + logits_cin
