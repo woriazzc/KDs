@@ -605,7 +605,7 @@ class CIN(BaseCTR):
     def forward_all_feature(self, sparse_input, dense_input=None):
         feature = self.embedding_layer(sparse_input)
         base = feature
-        all_features = [base]
+        all_features = [feature.reshape(feature.shape[0], -1)]
         x = feature
         for comp in self.cin:
             x = comp(x, base)
