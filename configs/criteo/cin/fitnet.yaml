@@ -5,5 +5,5 @@ lr: 1.e-3
 lmbda: 0.01
 fitnet_layer: penultimate
 
-# lmbda: 1.e-5
+# lmbda: 0.01
 # fitnet_layer: embedding
