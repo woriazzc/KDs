@@ -947,6 +947,18 @@ class HetComp(BaseKD4Rec):
         return loss
 
 
+class WarmUp(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "warmup"
+        self.freeze = args.warmup_freeze
+        self.student.embedding_layer = deepcopy(self.teacher.embedding_layer)
+        for param in self.student.embedding_layer.parameters():
+                param.requires_grad = (not self.freeze)
+    
+    def get_loss(self, data, label):
+        return torch.tensor(0.).cuda()
+
 class FitNet(BaseKD4CTR):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
