@@ -102,3 +102,6 @@ python -u main_ctr.py --dataset=criteo --backbone=dnn --model=fitnet
 python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=bced
 python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=clid
 python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=hetd
+
+python -u main_ctr.py --dataset=criteo --backbone=cin --model=fitnet
+python -u main_ctr.py --dataset=criteo --backbone=cin --model=hetd

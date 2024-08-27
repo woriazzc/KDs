@@ -601,6 +601,16 @@ class CIN(BaseCTR):
             p.append(torch.sum(x, dim=-1))
         p = torch.cat(p, dim=-1)
         return p
+    
+    def forward_all_feature(self, sparse_input, dense_input=None):
+        feature = self.embedding_layer(sparse_input)
+        base = feature
+        all_features = [base]
+        x = feature
+        for comp in self.cin:
+            x = comp(x, base)
+            all_features.append(torch.sum(x, dim=-1))
+        return all_features
 
 
 class XDeepFM(BaseCTR):
