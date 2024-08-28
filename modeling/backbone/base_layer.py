@@ -154,3 +154,34 @@ class CINComp(nn.Module):
             (infeature[:, :, None, :] * base[:, None, :, :]) \
             .reshape(infeature.shape[0], infeature.shape[1] * base.shape[1], -1)
         )
+
+
+class AutoInt_AttentionLayer(nn.Module):
+    def __init__(self, headNum=2, att_emb=16, input_emb=16):
+        super().__init__()
+        self.headNum = headNum
+        self.att_emb = att_emb
+        self.input_emb = input_emb
+        self.Query = nn.Parameter(torch.zeros(1, self.headNum, 1, self.input_emb, self.att_emb))
+        self.Key = nn.Parameter(torch.zeros(1, self.headNum, 1, self.input_emb, self.att_emb))
+        self.Value = nn.Parameter(torch.zeros(1, self.headNum, 1, self.input_emb, self.att_emb))
+        self.res = nn.Parameter(torch.zeros(self.input_emb, self.headNum * self.att_emb))
+        self.init()
+
+    def forward(self, feature):
+        res = feature @ self.res
+        feature = feature.reshape(feature.shape[0], 1, feature.shape[1], 1, -1 )
+        query = (feature @ self.Query).squeeze(3)
+        key = (feature @ self.Key).squeeze(3)
+        value = (feature @ self.Value).squeeze(3)
+
+        score = torch.softmax(query @ key.transpose(-1, -2), dim=-1)
+        em = score @ value
+        em = torch.transpose(em, 1, 2)
+        em = em.reshape(res.shape[0], res.shape[1], res.shape[2])
+        
+        return torch.relu(em + res)
+    
+    def init(self):
+        for params in self.parameters():
+            nn.init.xavier_uniform_(params, gain=1.414)

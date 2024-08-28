@@ -13,7 +13,7 @@ from scipy.sparse import csr_matrix
 
 from .base_model import BaseRec, BaseGCN, BaseCTR
 from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls
-from .base_layer import BehaviorAggregator, MLP, LR, CrossNetComp, CINComp
+from .base_layer import BehaviorAggregator, MLP, LR, CrossNetComp, CINComp, AutoInt_AttentionLayer
 
 
 """
@@ -514,7 +514,8 @@ class DCNV2(BaseCTR):
         cross = feature
         for i in range(self.depth):
             cross = self.crossnet[i](base, cross)
-        return self.linear(cross)
+        logits = self.linear(cross) + mlp
+        return logits
     
     def forward_penultimate(self, sparse_input, dense_input=None):
         dense_input = self.embedding_layer(sparse_input)
@@ -650,3 +651,26 @@ class CrossCIN(BaseCTR):
         logits_crossnet = self.crossnet.FeatureInteraction(feature, sparse_input)
         logits_cin = self.cin.FeatureInteraction(feature, sparse_input)
         return logits_crossnet + logits_cin
+
+
+class AutoInt(BaseCTR):
+    def __init__(self, args, feature_stastic):
+        super().__init__(args, feature_stastic)
+        self.headNum = args.num_head
+        self.LayerNum = args.depth
+        self.att_emb = args.attention_dim
+        self.hidden_dims = args.hidden_dims
+        self.dropout = args.dropout
+        self.featureNum = len(feature_stastic) - 1
+        self.input_emb = self.att_emb * self.headNum
+        self.interacting = nn.Sequential(*[AutoInt_AttentionLayer(self.headNum, self.att_emb, self.input_emb if _ != 0 else self.embedding_dim) for _ in range(self.LayerNum)])
+        self.mlp = MLP(self.embedding_dim, feature_stastic, self.hidden_dims, self.dropout)
+        self.linear = nn.Linear(self.input_emb * self.featureNum, 1)
+        nn.init.xavier_uniform_(self.linear.weight, gain=1.414)
+
+    def FeatureInteraction(self, feature, sparse_input):
+        mlp = self.mlp(feature)        
+        attention = self.interacting(feature) #[b,f,h*d]
+        attention = attention.reshape(feature.shape[0], -1)
+        logits = self.linear(attention) + mlp
+        return logits

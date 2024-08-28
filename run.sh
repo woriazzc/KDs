@@ -85,6 +85,7 @@ python -u main_ctr.py --dataset=criteo --backbone=dnn --train_teacher --suffix t
 python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --train_teacher --suffix teacher
 python -u main_ctr.py --dataset=criteo --backbone=cin --train_teacher --suffix teacher
 python -u main_ctr.py --dataset=criteo --backbone=xdeepfm --train_teacher --suffix teacher
+python -u main_ctr.py --dataset=criteo --backbone=autoint --train_teacher --suffix teacher
 
 # from scratch
 python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=scratch --suffix student
