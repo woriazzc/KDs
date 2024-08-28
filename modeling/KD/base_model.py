@@ -19,7 +19,7 @@ class BaseKD(nn.Module):
 
         if self.frozen_teacher:
             for param in self.teacher.parameters():
-                param.requires_grad=False
+                param.requires_grad = False
 
     def get_loss(self):
         raise NotImplementedError
@@ -30,13 +30,17 @@ class BaseKD(nn.Module):
     def do_something_in_each_epoch(self, epoch):
         return
     
-    def train(self):
-        self.training = True
-        self.student.train()
+    def train(self, mode=True):
+        if not isinstance(mode, bool):
+            raise ValueError("training mode is expected to be boolean")
+        self.training = mode
+        for module in self.children():
+            module.train(mode)
+        self.teacher.eval()
+        return self
 
     def eval(self):
-        self.training = False
-        self.student.eval()
+        return self.train(False)
     
     def get_params_to_update(self):
         return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
