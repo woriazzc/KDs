@@ -185,3 +185,56 @@ class AutoInt_AttentionLayer(nn.Module):
     def init(self):
         for params in self.parameters():
             nn.init.xavier_uniform_(params, gain=1.414)
+
+
+class EulerInteractionLayer(nn.Module):
+    def __init__(self, inshape, outshape, embedding_dim, apply_norm, drop_ex, drop_im):
+        super().__init__()
+        self.inshape, self.outshape = inshape, outshape
+        self.feature_dim = embedding_dim
+        self.apply_norm = apply_norm
+
+        # Initial assignment of the order vectors, which significantly affects the training effectiveness of the model.
+        # We empirically provide two effective initialization methods here.
+        # How to better initialize is still a topic to be further explored.
+        if inshape == outshape:
+            init_orders = torch.eye(inshape // self.feature_dim, outshape // self.feature_dim)
+        else:
+            init_orders = torch.softmax(torch.randn(inshape // self.feature_dim, outshape // self.feature_dim) / 0.01, dim=0)
+        
+        self.inter_orders = nn.Parameter(init_orders)
+        self.im = nn.Linear(inshape, outshape)
+        nn.init.normal_(self.im.weight, mean=0, std=0.01)
+
+        self.bias_lam = nn.Parameter(torch.randn(1, self.feature_dim, outshape // self.feature_dim) * 0.01)
+        self.bias_theta = nn.Parameter(torch.randn(1, self.feature_dim, outshape // self.feature_dim) * 0.01)
+
+        self.drop_ex = nn.Dropout(drop_ex)
+        self.drop_im = nn.Dropout(drop_im)
+        self.norm_r = nn.LayerNorm([self.feature_dim])
+        self.norm_p = nn.LayerNorm([self.feature_dim])
+    
+    def forward(self, complex_features):
+        r, p = complex_features
+
+        lam = r ** 2 + p ** 2 + 1e-8
+        theta = torch.atan2(p, r)
+        lam, theta = lam.reshape(lam.shape[0], -1, self.feature_dim), theta.reshape(theta.shape[0], -1, self.feature_dim)
+        lam = 0.5 * torch.log(lam)
+        lam, theta = torch.transpose(lam, -2, -1), torch.transpose(theta, -2, -1)
+        lam, theta = self.drop_ex(lam), self.drop_ex(theta)
+        lam, theta = lam @ (self.inter_orders) + self.bias_lam, theta @ (self.inter_orders) + self.bias_theta
+        lam = torch.exp(lam)
+        lam, theta = torch.transpose(lam, -2, -1), torch.transpose(theta, -2, -1)
+
+        r, p = r.reshape(r.shape[0], -1), p.reshape(p.shape[0], -1)
+        r, p = self.drop_im(r), self.drop_im(p)
+        r, p = self.im(r), self.im(p)
+        r, p = torch.relu(r), torch.relu(p)
+        r, p = r.reshape(r.shape[0], -1, self.feature_dim), p.reshape(p.shape[0], -1, self.feature_dim)
+        
+        o_r, o_p = r + lam * torch.cos(theta), p + lam * torch.sin(theta)
+        o_r, o_p = o_r.reshape(o_r.shape[0], -1, self.feature_dim), o_p.reshape(o_p.shape[0], -1, self.feature_dim)
+        if self.apply_norm:
+            o_r, o_p = self.norm_r(o_r), self.norm_p(o_p)
+        return o_r, o_p

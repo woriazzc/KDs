@@ -13,7 +13,7 @@ from scipy.sparse import csr_matrix
 
 from .base_model import BaseRec, BaseGCN, BaseCTR
 from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls
-from .base_layer import BehaviorAggregator, MLP, LR, CrossNetComp, CINComp, AutoInt_AttentionLayer
+from .base_layer import BehaviorAggregator, MLP, LR, CrossNetComp, CINComp, AutoInt_AttentionLayer, EulerInteractionLayer
 
 
 """
@@ -673,4 +673,32 @@ class AutoInt(BaseCTR):
         attention = self.interacting(feature) #[b,f,h*d]
         attention = attention.reshape(feature.shape[0], -1)
         logits = self.linear(attention) + mlp
+        return logits
+
+
+class EulerNet(BaseCTR):
+    def __init__(self, args, feature_stastic):
+        super().__init__(args, feature_stastic)
+        self.order_list = args.order_list
+        self.apply_norm = args.eulernet_norm
+        self.drop_ex = args.eulernet_dropex
+        self.drop_im = args.eulernet_dropim
+        field_num = len(feature_stastic) - 1
+        shape_list = [self.embedding_dim * field_num] + [num_neurons * self.embedding_dim for num_neurons in self.order_list]
+
+        interaction_shapes = []
+        for inshape, outshape in zip(shape_list[:-1], shape_list[1:]):
+            interaction_shapes.append(EulerInteractionLayer(inshape, outshape, self.embedding_dim, self.apply_norm, self.drop_ex, self.drop_im))
+
+        self.Euler_interaction_layers = nn.Sequential(*interaction_shapes)
+        self.mu = nn.Parameter(torch.ones(1, field_num, 1))
+        self.reg = nn.Linear(shape_list[-1], 1)
+        nn.init.xavier_normal_(self.reg.weight)
+
+    def FeatureInteraction(self, feature, sparse_input):
+        r, p = self.mu * torch.cos(feature), self.mu * torch.sin(feature)
+        o_r, o_p = self.Euler_interaction_layers((r, p))
+        o_r, o_p = o_r.reshape(o_r.shape[0], -1), o_p.reshape(o_p.shape[0], -1)
+        re, im = self.reg(o_r), self.reg(o_p)
+        logits = re + im
         return logits
