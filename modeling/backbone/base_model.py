@@ -169,7 +169,9 @@ class BaseCTR(nn.Module):
         self.args = args
         self.embedding_dim = args.embedding_dim
         self.L2_weight = args.L2
+        self.num_fields = len(feature_stastic) - 1
         self.embedding_layer = Embedding(self.embedding_dim, feature_stastic)
+        self.embedding_layer_dim = self.embedding_dim * self.num_fields
     
     def forward_embed(self, sparse_input, dense_input=None):
         """Return the output of the embedding layer

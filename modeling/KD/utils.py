@@ -129,3 +129,10 @@ def CKA(X, Y):
     varK = torch.sqrt(HSCI(K, K))
     varL = torch.sqrt(HSCI(L, L))
     return hsci / (varK * varL)
+
+
+def info_abundance(X):
+    lam = torch.linalg.svdvals(X)
+    lam = torch.abs(lam)
+    lam = lam / lam.max()
+    return lam.sum(-1).mean().item()

@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.utils.data as data
 import torch.nn.functional as F
 
-from .utils import Expert, CKA
+from .utils import Expert, CKA, info_abundance
 from .base_model import BaseKD4Rec, BaseKD4CTR
 
 
@@ -962,6 +962,7 @@ class WarmUp(BaseKD4CTR):
     def get_loss(self, data, label):
         return torch.tensor(0.).cuda()
 
+
 class FitNet(BaseKD4CTR):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
@@ -969,7 +970,7 @@ class FitNet(BaseKD4CTR):
         self.layer = args.fitnet_layer
         self.verbose = args.verbose
         if self.layer == "embedding":
-            self.projector = nn.Linear(self.student.embedding_dim, self.teacher.embedding_dim)
+            self.projector = nn.Linear(self.student.embedding_layer_dim, self.teacher.embedding_layer_dim)
         elif self.layer == "penultimate":
             if isinstance(self.teacher._penultimate_dim, int):
                 # For one-stream models
@@ -988,6 +989,7 @@ class FitNet(BaseKD4CTR):
             raise ValueError
         
     def do_something_in_each_epoch(self, epoch):
+        self.epoch = epoch
         if self.verbose:
             if epoch > 0 and not self.cka is None:
                 print(self.cka)
@@ -997,7 +999,9 @@ class FitNet(BaseKD4CTR):
     def get_loss(self, data, label):
         if self.layer == "embedding":
             S_emb = self.student.forward_embed(data)
+            S_emb = S_emb.reshape(S_emb.shape[0], -1)
             T_emb = self.teacher.forward_embed(data)
+            T_emb = T_emb.reshape(T_emb.shape[0], -1)
             S_emb = self.projector(S_emb)
             loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean()
         elif self.layer == "penultimate":
@@ -1016,19 +1020,30 @@ class FitNet(BaseKD4CTR):
         else: raise ValueError
 
         if self.verbose and self.cnt < 5:
-            # calculate CKA
+            # # calculate CKA
+            # with torch.no_grad():
+            #     S_embs = self.student.forward_all_feature(data)
+            #     T_embs = self.teacher.forward_all_feature(data)
+            #     CKA_mat = np.zeros((len(T_embs), len(S_embs)))
+            #     for id_T, T_emb in enumerate(T_embs):
+            #         for id_S, S_emb in enumerate(S_embs):
+            #             CKA_mat[id_T, id_S] = CKA(T_emb, S_emb).item()
+            #     if self.cka is None:
+            #         self.cka = CKA_mat
+            #     else:
+            #         self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
+            #         self.cnt += 1
+
+            # calculate information abundance
             with torch.no_grad():
-                S_embs = self.student.forward_all_feature(data)
-                T_embs = self.teacher.forward_all_feature(data)
-                CKA_mat = np.zeros((len(T_embs), len(S_embs)))
-                for id_T, T_emb in enumerate(T_embs):
-                    for id_S, S_emb in enumerate(S_embs):
-                        CKA_mat[id_T, id_S] = CKA(T_emb, S_emb).item()
-                if self.cka is None:
-                    self.cka = CKA_mat
-                else:
-                    self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
-                    self.cnt += 1
+                S_embs = self.student.forward_embed(data)
+                T_embs = self.teacher.forward_embed(data)
+                S_embs = S_embs.reshape(S_embs.shape[0], -1)
+                T_embs = T_embs.reshape(T_embs.shape[0], -1)
+                info_S = info_abundance(S_embs)
+                info_T = info_abundance(T_embs)
+                print(info_S, info_T)
+                self.cnt += 1
         return loss
 
 
