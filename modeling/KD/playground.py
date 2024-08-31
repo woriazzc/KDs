@@ -1252,3 +1252,23 @@ class FFFit(BaseKD4CTR):
             S_field_emb = projector(S_emb[:, field, :])
             loss += (T_field_emb.detach() - S_field_emb).pow(2).sum(-1).mean()
         return loss
+
+
+class AnyD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "anyd"
+        self.T_layer = args.T_layer
+        self.S_layer = args.S_layer
+        self.T_dim = self.teacher.get_layer_dim(self.T_layer)
+        self.S_dim = self.student.get_layer_dim(self.S_layer)
+        self.projector = nn.Linear(self.S_dim, self.T_dim)
+        nn.init.xavier_normal_(self.projector.weight)
+        nn.init.constant_(self.projector.bias, 0)
+
+    def get_loss(self, data, label):
+        S_emb = self.student.forward_layer(data, self.S_layer)    # bs, layer_dim
+        T_emb = self.teacher.forward_layer(data, self.T_layer)
+        S_emb = self.projector(S_emb)
+        loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean()
+        return loss

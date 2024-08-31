@@ -434,6 +434,22 @@ class DNN(BaseCTR):
         logits = self.mlp(dense_input)
         return logits
     
+    def get_layer_dim(self, layer):
+        assert layer <= len(self.hidden_dims), "Layer id exceed maximum layers."
+        if layer == 0: return self.embedding_layer_dim
+        else: return self.hidden_dims[layer - 1]
+
+    def forward_layer(self, sparse_input, layer):
+        assert layer <= len(self.hidden_dims), "Layer id exceed maximum layers."
+        feature = self.embedding_layer(sparse_input)
+        feature = feature.reshape(feature.shape[0], -1)
+        if layer == 0: return feature
+        base = feature
+        cross = feature
+        for i in range(layer):
+            cross = self.crossnet[i](base, cross)
+        return cross
+    
     @property
     def _penultimate_dim(self):
         return self.hidden_dims[-2]
@@ -466,12 +482,28 @@ class CrossNet(BaseCTR):
             cross = self.crossnet[i](base, cross)
         logits = self.linear(cross)
         return logits
+    
+    def get_layer_dim(self, layer):
+        assert layer <= self.depth, "Layer id exceed maximum layers."
+        if layer == 0: return self.embedding_layer_dim
+        else: return self.linear.weight.shape[1]
 
+    def forward_layer(self, sparse_input, layer):
+        assert layer <= self.depth, "Layer id exceed maximum layers."
+        feature = self.embedding_layer(sparse_input)
+        feature = feature.reshape(feature.shape[0], -1)
+        if layer == 0: return feature
+        base = feature
+        cross = feature
+        for i in range(layer):
+            cross = self.crossnet[i](base, cross)
+        return cross
+    
     @property
     def _penultimate_dim(self):
         # input dim of self.linear
         return self.linear.weight.shape[1]
-
+    
     def forward_penultimate(self, sparse_input, dense_input=None):
         feature = self.embedding_layer(sparse_input)
         feature = feature.reshape(feature.shape[0], -1)
