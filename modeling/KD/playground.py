@@ -3,6 +3,7 @@ import math
 import mlflow
 import random
 import numpy as np
+from copy import deepcopy
 
 from torch_cluster import knn
 import torch
@@ -1189,4 +1190,65 @@ class HetD(BaseKD4CTR):
                     self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
                     self.cnt += 1
         
+        return loss
+
+
+class PairD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "paird"
+        self.beta = args.paird_beta
+        self.tau = args.paird_tau
+
+    def do_something_in_each_epoch(self, epoch):
+        if epoch != 0: print(self.grad1, self.grad2)
+        self.cnt = 0
+        self.grad1, self.grad2 = 0., 0.
+
+    def get_loss(self, feature, label):
+        logit_S = self.student(feature).squeeze(1)
+        logit_T = self.teacher(feature).squeeze(1)
+
+        randidx = torch.arange(len(logit_T)).flip(-1)
+        neg_T, pos_T = logit_T.clone(), logit_T[randidx].clone()
+        idx = torch.argwhere(neg_T > pos_T)
+        neg_T[idx], pos_T[idx] = pos_T[idx], neg_T[idx]
+        neg_S, pos_S = logit_S.clone(), logit_S[randidx].clone()
+        neg_S[idx], pos_S[idx] = pos_S[idx], neg_S[idx]
+        gap_T = pos_T - neg_T
+        gap_S = pos_S.detach() - neg_S
+        y_T = torch.sigmoid(gap_T / self.tau)
+        y_S = torch.sigmoid(gap_S / self.tau)
+
+        loss_rk = F.binary_cross_entropy(y_S, y_T)
+        y_T = torch.sigmoid(logit_T)
+        loss_bce = F.binary_cross_entropy_with_logits(logit_S, y_T)
+        loss = self.beta * loss_rk + (1. - self.beta) * loss_bce
+        
+        with torch.no_grad():
+            # grad1 = (torch.sigmoid(logit_S) - torch.sigmoid(logit_T)).mean().detach().cpu().item()
+            # grad2 = (torch.sigmoid(gap_T) - torch.sigmoid(gap_S)).mean().detach().cpu().item()
+            grad1 = torch.autograd.grad(loss_bce, logit_S, retain_graph=True)[0].sum().detach().cpu().item()
+            grad2 = torch.autograd.grad(loss_rk, logit_S, retain_graph=True)[0].sum().detach().cpu().item()
+            self.grad1 = (self.grad1 * self.cnt + grad1) / (self.cnt + 1)
+            self.grad2 = (self.grad2 * self.cnt + grad2) / (self.cnt + 1)
+        return loss
+
+
+class FFFit(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "fffit"
+        self.num_fields = self.student.num_fields
+        self.projectors = nn.ModuleList([nn.Linear(self.student.embedding_dim, self.teacher.embedding_dim) for _ in range(self.num_fields)])
+    
+    def get_loss(self, data, label):
+        S_emb = self.student.forward_embed(data)    # bs, num_fields, embedding_dim
+        T_emb = self.teacher.forward_embed(data)
+        loss = 0.
+        for field in range(self.num_fields):
+            projector = self.projectors[field]
+            T_field_emb = T_emb[:, field, :]
+            S_field_emb = projector(S_emb[:, field, :])
+            loss += (T_field_emb.detach() - S_field_emb).pow(2).sum(-1).mean()
         return loss

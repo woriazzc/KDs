@@ -98,6 +98,8 @@ python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=hetd
 python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=rkd
 python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=bced
 python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=fitnet
+python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=clid
+python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=paird
 
 python -u main_ctr.py --dataset=criteo --backbone=dnn --model=bced
 python -u main_ctr.py --dataset=criteo --backbone=dnn --model=fitnet
