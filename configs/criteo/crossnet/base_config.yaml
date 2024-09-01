@@ -4,13 +4,13 @@ teacher:
   L2: 1.e-5
   depth: 4
 student:
-  # model: DNN
-  # embedding_dim: 20
-  # L2: 1.e-5
-  # hidden_dims: [64, 32, 1]
-  # dropout: 0.1
-  
-  model: CrossNet
+  model: DNN
   embedding_dim: 20
   L2: 1.e-5
-  depth: 1
+  hidden_dims: [64, 32, 1]
+  dropout: 0.1
+  
+  # model: CrossNet
+  # embedding_dim: 20
+  # L2: 1.e-5
+  # depth: 1

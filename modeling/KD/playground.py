@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph, CKA
+from .utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph, CKA, info_abundance
 from .base_model import BaseKD4Rec, BaseKD4CTR
 from .baseline import DE
 
@@ -1175,20 +1175,36 @@ class HetD(BaseKD4CTR):
         loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean() + loss_adaptor / (self.lmbda + 1e-8) * self.gamma
 
         if self.verbose and self.cnt < 5:
-            # calculate CKA
+            # # calculate CKA
+            # with torch.no_grad():
+            #     S_embs = self.student.forward_all_feature(data)
+            #     T_embs = self.teacher.forward_all_feature(data)
+            #     T_embs += [T_emb.detach()]
+            #     CKA_mat = np.zeros((len(T_embs), len(S_embs)))
+            #     for id_T, T_emb in enumerate(T_embs):
+            #         for id_S, S_emb in enumerate(S_embs):
+            #             CKA_mat[id_T, id_S] = CKA(T_emb, S_emb).item()
+            #     if self.cka is None:
+            #         self.cka = CKA_mat
+            #     else:
+            #         self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
+            #         self.cnt += 1
+
+            # calculate information abundance
             with torch.no_grad():
-                S_embs = self.student.forward_all_feature(data)
-                T_embs = self.teacher.forward_all_feature(data)
-                T_embs += [T_emb.detach()]
-                CKA_mat = np.zeros((len(T_embs), len(S_embs)))
-                for id_T, T_emb in enumerate(T_embs):
-                    for id_S, S_emb in enumerate(S_embs):
-                        CKA_mat[id_T, id_S] = CKA(T_emb, S_emb).item()
-                if self.cka is None:
-                    self.cka = CKA_mat
-                else:
-                    self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
-                    self.cnt += 1
+                S_emb = self.student.forward_penultimate(data)
+                T_emb = self.teacher.forward_penultimate(data)
+                S_emb = S_emb.reshape(S_emb.shape[0], -1)
+                T_emb = T_emb.reshape(T_emb.shape[0], -1)
+                info_S = info_abundance(S_emb)
+                info_T = info_abundance(T_emb)
+                print(info_S, info_T, end=" ")
+                S_emb = self.projector(S_emb)
+                T_emb = self.adaptor(T_emb)
+                info_S = info_abundance(S_emb)
+                info_T = info_abundance(T_emb)
+                print(info_S, info_T)
+                self.cnt += 1
         
         return loss
 
@@ -1271,4 +1287,101 @@ class AnyD(BaseKD4CTR):
         T_emb = self.teacher.forward_layer(data, self.T_layer)
         S_emb = self.projector(S_emb)
         loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean()
+        return loss
+
+
+class adaD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "adad"
+        self.beta = args.adad_beta
+        self.gamma = args.adad_gamma
+        self.lmbda = args.lmbda
+        self.verbose = args.verbose
+
+        student_penultimate_dim = self.student._penultimate_dim
+        if isinstance(self.teacher._penultimate_dim, int):
+            # For one-stream models
+            teacher_penultimate_dim = self.teacher._penultimate_dim
+        else:
+            # For two-stream models
+            cross_dim, deep_dim = self.teacher._penultimate_dim
+            teacher_penultimate_dim = cross_dim + deep_dim
+        self.projector = nn.Linear(student_penultimate_dim, teacher_penultimate_dim)
+        self.adaptor_S = nn.Linear(student_penultimate_dim, student_penultimate_dim)
+        self.adaptor_T = nn.Linear(teacher_penultimate_dim, teacher_penultimate_dim)
+        self.predictor_S = nn.Linear(student_penultimate_dim, 1)
+        self.predictor_T = nn.Linear(teacher_penultimate_dim, 1)
+    
+    def do_something_in_each_epoch(self, epoch):
+        # for embedding in self.student.embedding_layer.embedding.items():
+        #     print(int(info_abundance(embedding[1].weight.data)), end=" ")
+        # print()
+        # for embedding in self.teacher.embedding_layer.embedding.items():
+        #     print(int(info_abundance(embedding[1].weight.data)), end=" ")
+        if self.verbose:
+            if epoch > 0 and not self.cka is None:
+                print(self.cka)
+            self.cka = None
+            self.cnt = 0
+    
+    def get_loss(self, data, label):
+        S_emb = self.student.forward_penultimate(data)
+        T_emb = self.teacher.forward_penultimate(data)
+        if isinstance(self.teacher._penultimate_dim, tuple):
+            # Two-stream models
+            T_emb_cross, T_emb_deep = T_emb
+            T_emb = torch.cat([T_emb_cross, T_emb_deep], dim=-1)
+        T_emb_adapt = self.adaptor_T(T_emb)
+        S_emb_adapt = self.adaptor_S(S_emb.detach())
+        T_logits_adapt = self.predictor_T(T_emb_adapt)
+        S_logits_adapt = self.predictor_S(S_emb_adapt)
+        T_pred = torch.sigmoid(self.teacher(data))
+        S_pred = torch.sigmoid(self.student(data))
+        loss_adapt_T = F.binary_cross_entropy_with_logits(T_logits_adapt.squeeze(-1), label.squeeze(-1).float()) + self.beta * F.binary_cross_entropy_with_logits(T_logits_adapt.squeeze(-1), S_pred.detach().squeeze(-1))
+        loss_adapt_S = F.binary_cross_entropy_with_logits(S_logits_adapt.squeeze(-1), label.squeeze(-1).float()) + self.beta * F.binary_cross_entropy_with_logits(S_logits_adapt.squeeze(-1), T_pred.detach().squeeze(-1))
+        adaptor_S_detach = deepcopy(self.adaptor_S)
+        for param in adaptor_S_detach.parameters():
+                param.requires_grad = False
+        S_emb_proj = self.projector(adaptor_S_detach(S_emb))
+        loss = (T_emb_adapt.detach() - S_emb_proj).pow(2).sum(-1).mean() + (loss_adapt_S + loss_adapt_T) / (self.lmbda + 1e-8) * self.gamma
+        
+        if self.verbose and self.cnt < 5:
+            # # calculate CKA
+            # with torch.no_grad():
+            #     S_embs = self.student.forward_all_feature(data)
+            #     T_embs = self.teacher.forward_all_feature(data)
+            #     T_embs += [T_emb.detach()]
+            #     CKA_mat = np.zeros((len(T_embs), len(S_embs)))
+            #     for id_T, T_emb in enumerate(T_embs):
+            #         for id_S, S_emb in enumerate(S_embs):
+            #             CKA_mat[id_T, id_S] = CKA(T_emb, S_emb).item()
+            #     if self.cka is None:
+            #         self.cka = CKA_mat
+            #     else:
+            #         self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
+            #         self.cnt += 1
+
+            # calculate information abundance
+            with torch.no_grad():
+                info_S = info_abundance(S_emb)
+                info_T = info_abundance(T_emb)
+                info_adapt_S = info_abundance(S_emb_adapt)
+                info_adapt_T = info_abundance(T_emb_adapt)
+                info_proj_S = info_abundance(S_emb_proj)
+                print(info_S, info_T, info_adapt_S, info_adapt_T, info_proj_S)
+                self.cnt += 1
+
+            # calculate information abundance for each field
+            # with torch.no_grad():
+            #     # for i in range(self.student.num_fields):
+            #     #     emb = S_emb[:, i*self.student.embedding_dim:(i+1)*self.student.embedding_dim]
+            #     #     print(int(info_abundance(emb)), end=" ")
+            #     # print()
+            #     for i in range(self.teacher.num_fields):
+            #         emb = T_emb[:, i*self.teacher.embedding_dim:(i+1)*self.teacher.embedding_dim]
+            #         print(int(info_abundance(emb)), end=" ")
+            #     print()
+            #     self.cnt += 1
+        
         return loss
