@@ -1225,7 +1225,8 @@ class PairD(BaseKD4CTR):
         logit_S = self.student(feature).squeeze(1)
         logit_T = self.teacher(feature).squeeze(1)
 
-        randidx = torch.arange(len(logit_T)).flip(-1)
+        # randidx = torch.arange(len(logit_T)).flip(-1)
+        randidx = torch.randperm(len(logit_T))
         neg_T, pos_T = logit_T.clone(), logit_T[randidx].clone()
         idx = torch.argwhere(neg_T > pos_T)
         neg_T[idx], pos_T[idx] = pos_T[idx], neg_T[idx]
@@ -1233,8 +1234,9 @@ class PairD(BaseKD4CTR):
         neg_S[idx], pos_S[idx] = pos_S[idx], neg_S[idx]
         gap_T = pos_T - neg_T
         gap_S = pos_S.detach() - neg_S
-        y_T = torch.sigmoid(gap_T / self.tau)
-        y_S = torch.sigmoid(gap_S / self.tau)
+        idx = torch.argwhere(neg_S < torch.quantile(logit_S, 0.01).detach())
+        y_T = torch.sigmoid(gap_T[idx] / self.tau)
+        y_S = torch.sigmoid(gap_S[idx] / self.tau)
 
         loss_rk = F.binary_cross_entropy(y_S, y_T)
         y_T = torch.sigmoid(logit_T)

@@ -1002,14 +1002,14 @@ class FitNet(BaseKD4CTR):
             S_emb = S_emb.reshape(S_emb.shape[0], -1)
             T_emb = self.teacher.forward_embed(data)
             T_emb = T_emb.reshape(T_emb.shape[0], -1)
-            S_emb = self.projector(S_emb)
-            loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean()
+            S_emb_proj = self.projector(S_emb)
+            loss = (T_emb.detach() - S_emb_proj).pow(2).sum(-1).mean()
         elif self.layer == "penultimate":
             S_emb = self.student.forward_penultimate(data)
             T_emb = self.teacher.forward_penultimate(data)
             if isinstance(self.teacher._penultimate_dim, int):
-                S_emb = self.projector(S_emb)
-                loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean()
+                S_emb_proj = self.projector(S_emb)
+                loss = (T_emb.detach() - S_emb_proj).pow(2).sum(-1).mean()
             else:
                 S_emb_cross = self.projector_cross(S_emb)
                 S_emb_deep = self.projector_deep(S_emb)
@@ -1036,13 +1036,10 @@ class FitNet(BaseKD4CTR):
 
             # calculate information abundance
             with torch.no_grad():
-                S_embs = self.student.forward_embed(data)
-                T_embs = self.teacher.forward_embed(data)
-                S_embs = S_embs.reshape(S_embs.shape[0], -1)
-                T_embs = T_embs.reshape(T_embs.shape[0], -1)
-                info_S = info_abundance(S_embs)
-                info_T = info_abundance(T_embs)
-                print(info_S, info_T)
+                info_S = info_abundance(S_emb)
+                info_T = info_abundance(T_emb)
+                info_S_proj = info_abundance(S_emb_proj)
+                print(f"infoS:{info_S:.2f}, infoT:{info_T:.2f}, infoS_proj:{info_S_proj:.2f}")
                 self.cnt += 1
         return loss
 
