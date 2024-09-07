@@ -1387,3 +1387,184 @@ class adaD(BaseKD4CTR):
             #     self.cnt += 1
         
         return loss
+
+
+class copyD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "copyd"
+        self.num_experts = args.num_experts
+        self.beta = args.copyd_beta
+        self.gamma = args.copyd_gamma
+        self.teacher_linear = self.teacher.linear
+        self.projector = Projector(self.student._penultimate_dim, self.teacher._penultimate_dim, self.num_experts, norm=False, dropout_rate=0., shallow=False)
+    
+    # def get_ratings(self, data):
+    #     old_linear = deepcopy(self.student.linear)
+    #     self.student.linear = nn.Sequential(self.projector, self.teacher_linear)
+    #     res = self.student(data)
+    #     self.student.linear = old_linear
+    #     return res
+        
+    def do_something_in_each_epoch(self, epoch):
+        self.epoch = epoch
+        if epoch != 0: print(f"loss_emb:{self.loss_emb}, loss_linear:{self.loss_linear}")
+        self.loss_emb, self.loss_linear, self.cnt = 0, 0, 0
+    
+    def get_loss(self, data, label):
+        S_emb = self.student.forward_penultimate(data)
+        T_emb = self.teacher.forward_penultimate(data)
+        S_emb_proj = self.projector(S_emb)
+        loss_emb = (T_emb.detach() - S_emb_proj).pow(2).sum(-1).mean()
+        # S_logits = self.student.linear(S_emb.detach())
+        # proj_linear_logits = self.teacher_linear(S_emb_proj).detach()
+        # y_T = torch.sigmoid(proj_linear_logits)
+        # loss_linear = F.binary_cross_entropy_with_logits(S_logits, y_T.float())
+        # loss_linear = F.binary_cross_entropy_with_logits(S_logits.squeeze(-1), label.squeeze(-1).float())
+        # for _, module in self.student.linear.named_modules():
+        #         for p_name, param in module.named_parameters():
+        #             if param.requires_grad:
+        #                 if p_name in ["weight", "bias"]:
+        #                     loss_linear += torch.norm(param, p=2) * self.student.L2_weight
+        loss = loss_emb
+        self.loss_emb = (self.loss_emb * self.cnt + loss_emb.detach().item()) / (self.cnt + 1)
+        # self.loss_linear = (self.loss_linear * self.cnt + loss_linear.detach().item()) / (self.cnt + 1)
+        self.cnt += 1
+        return loss
+
+    def forward(self, data, label):
+        # self.student.linear = nn.Sequential(self.projector, self.teacher_linear)
+        output = self.student(data)
+        base_loss = self.student.get_loss(output, label)
+        kd_loss = self.get_loss(data, label)
+        loss = kd_loss + self.lmbda * base_loss
+        return loss, base_loss.detach(), kd_loss.detach()
+
+
+class fieldD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "fieldd"
+        self.num_experts = args.num_experts
+        self.beta = args.fieldd_beta
+        self.gamma = args.fieldd_gamma
+        self.teacher_linear = self.teacher.linear
+        self.projectors = nn.ModuleList([Projector(self.student._penultimate_dim, self.teacher._penultimate_dim // self.student.num_fields, 1, norm=False, dropout_rate=0., shallow=True) for _ in range(self.student.num_fields)])
+
+    # def get_ratings(self, data):
+    #     old_linear = deepcopy(self.student.linear)
+    #     self.student.linear = nn.Sequential(self.projector, self.teacher_linear)
+    #     res = self.student(data)
+    #     self.student.linear = old_linear
+    #     return res
+    
+    def do_something_in_each_epoch(self, epoch):
+        self.epoch = epoch
+        if epoch != 0: print(f"loss_emb:{self.loss_emb}, loss_linear:{self.loss_linear}")
+        self.loss_emb, self.loss_linear, self.cnt = 0, 0, 0
+    
+    def get_loss(self, data, label):
+        S_emb = self.student.forward_penultimate(data)
+        T_emb = self.teacher.forward_penultimate(data)
+        S_emb_proj = []
+        for i in range(self.teacher.num_fields):
+            S_emb_proj.append(self.projectors[i](S_emb))
+        S_emb_proj = torch.cat(S_emb_proj, dim=-1)
+        loss_emb = (T_emb.detach() - S_emb_proj).pow(2).sum(-1).mean()
+        S_logits = self.student.linear(S_emb.detach())
+        proj_linear_logits = self.teacher_linear(S_emb_proj).detach()
+        y_T = torch.sigmoid(proj_linear_logits)
+        loss_linear = F.binary_cross_entropy_with_logits(S_logits, y_T.float())
+        loss_linear = self.gamma * loss_linear + (1. - self.gamma) * F.binary_cross_entropy_with_logits(S_logits.squeeze(-1), label.squeeze(-1).float())
+        loss = self.beta * loss_emb + (1. - self.beta) * loss_linear
+        self.loss_emb = (self.loss_emb * self.cnt + loss_emb.detach().item()) / (self.cnt + 1)
+        self.loss_linear = (self.loss_linear * self.cnt + loss_linear.detach().item()) / (self.cnt + 1)
+        self.cnt += 1
+        return loss
+
+    def forward(self, data, label):
+        output = self.student(data)
+        base_loss = self.student.get_loss(output, label)
+        kd_loss = self.get_loss(data, label)
+        loss = kd_loss
+        return loss, base_loss.detach(), kd_loss.detach()
+
+
+class watD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "watd"
+        self.beta = args.watd_beta
+        self.adaptor = Projector(self.teacher._penultimate_dim, self.student._penultimate_dim, 1, norm=False, dropout_rate=0., shallow=True)
+        self.predictor = nn.Linear(self.student._penultimate_dim, 1)
+    
+    def do_something_in_each_epoch(self, epoch):
+        self.epoch = epoch
+        if epoch != 0: print(f"loss_emb:{self.loss_emb}, loss_adapt:{self.loss_adapt}")
+        self.loss_emb, self.loss_adapt, self.cnt = 0, 0, 0
+    
+    def get_loss(self, data, label):
+        S_emb = self.student.forward_penultimate(data)
+        T_emb = self.teacher.forward_penultimate(data).detach()
+        T_emb_adapt = self.adaptor(T_emb)
+        T_logit = self.teacher(data)
+        T_adapt_logit = self.predictor(T_emb_adapt)
+        loss_emb = (T_emb_adapt.detach() - S_emb).pow(2).sum(-1).mean()
+        T_pred = torch.sigmoid(T_logit)
+        loss_adapt = F.binary_cross_entropy_with_logits(T_adapt_logit, T_pred)
+        loss = loss_emb + self.beta * loss_adapt
+        self.loss_emb = (self.loss_emb * self.cnt + loss_emb.detach().item()) / (self.cnt + 1)
+        self.loss_adapt = (self.loss_adapt * self.cnt + loss_adapt.detach().item()) / (self.cnt + 1)
+        self.cnt += 1
+        return loss
+
+    def forward(self, data, label):
+        output = self.student(data)
+        base_loss = self.student.get_loss(output, label)
+        kd_loss = self.get_loss(data, label)
+        loss = kd_loss
+        return loss, base_loss.detach(), kd_loss.detach()
+
+
+class attachD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "attachd"
+        self.num_experts = args.num_experts
+        self.teacher_linear = self.teacher.linear
+        self.projector = Projector(self.student._penultimate_dim, self.teacher._penultimate_dim, self.num_experts, norm=False, dropout_rate=0., shallow=False)
+        self.student.linear = Projector(self.student._penultimate_dim, 1, 1, norm=False, dropout_rate=0., shallow=False)
+    
+    # def get_ratings(self, data):
+    #     old_linear = deepcopy(self.student.linear)
+    #     self.student.linear = nn.Sequential(self.projector, self.teacher_linear)
+    #     res = self.student(data)
+    #     self.student.linear = old_linear
+    #     return res
+        
+    def do_something_in_each_epoch(self, epoch):
+        self.epoch = epoch
+        if epoch != 0: print(f"loss_emb:{self.loss_emb}, loss_linear:{self.loss_linear}")
+        self.loss_emb, self.loss_linear, self.cnt = 0, 0, 0
+    
+    def get_loss(self, data, label):
+        S_emb = self.student.forward_penultimate(data)
+        T_emb = self.teacher.forward_penultimate(data)
+        S_emb_proj = self.projector(S_emb)
+        loss_emb = (T_emb.detach() - S_emb_proj).pow(2).sum(-1).mean()
+        S_logits = self.student.linear(S_emb.detach())
+        proj_linear_logits = self.teacher_linear(S_emb_proj).detach()
+        y_T = torch.sigmoid(proj_linear_logits)
+        loss_linear = F.binary_cross_entropy_with_logits(S_logits, y_T.float())
+        loss = loss_emb + loss_linear
+        self.loss_emb = (self.loss_emb * self.cnt + loss_emb.detach().item()) / (self.cnt + 1)
+        self.loss_linear = (self.loss_linear * self.cnt + loss_linear.detach().item()) / (self.cnt + 1)
+        self.cnt += 1
+        return loss
+
+    def forward(self, data, label):
+        output = self.student(data)
+        base_loss = self.student.get_loss(output, label)
+        kd_loss = self.get_loss(data, label)
+        loss = kd_loss
+        return loss, base_loss.detach(), kd_loss.detach()
