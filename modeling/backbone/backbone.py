@@ -13,7 +13,7 @@ from scipy.sparse import csr_matrix
 
 from .base_model import BaseRec, BaseGCN, BaseCTR
 from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls
-from .base_layer import BehaviorAggregator, MLP, LR, CrossNetComp, CINComp, AutoInt_AttentionLayer, EulerInteractionLayer
+from .base_layer import BehaviorAggregator, MLP, LR, CrossNetComp, CINComp, AutoInt_AttentionLayer, EulerInteractionLayer, GateCrossLayer
 
 
 """
@@ -513,6 +513,10 @@ class CrossNet(BaseCTR):
             cross = self.crossnet[i](base, cross)
         return cross
     
+    @property
+    def _all_layer_dims(self):
+        return [self.embedding_layer_dim] + [self.linear.weight.shape[1]] * self.depth
+
     def forward_all_feature(self, sparse_input, dense_input=None):
         feature = self.embedding_layer(sparse_input)
         feature = feature.reshape(feature.shape[0], -1)
@@ -734,3 +738,66 @@ class EulerNet(BaseCTR):
         re, im = self.reg(o_r), self.reg(o_p)
         logits = re + im
         return logits
+
+
+class GateCrossNet(BaseCTR):
+    def __init__(self, args, feature_stastic):
+        super().__init__(args, feature_stastic)
+        self.depth = args.depth
+        self.crossnet = nn.ModuleList([GateCrossLayer(self.embedding_dim, feature_stastic) for i in range(self.depth)])
+        self.linear = nn.Linear((len(feature_stastic) - 1) * self.embedding_dim, 1)
+        nn.init.normal_(self.linear.weight)
+    
+    def FeatureInteraction(self, feature, sparse_input):
+        features = feature.reshape(feature.shape[0], -1)
+        base = features
+        cross = features
+        for i in range(self.depth):
+            cross = self.crossnet[i](base, cross)
+        logits = self.linear(cross)
+        return logits
+    
+    def get_layer_dim(self, layer):
+        assert layer <= self.depth, "Layer id exceed maximum layers."
+        if layer == 0: return self.embedding_layer_dim
+        else: return self.linear.weight.shape[1]
+
+    def forward_layer(self, sparse_input, layer):
+        assert layer <= self.depth, "Layer id exceed maximum layers."
+        feature = self.embedding_layer(sparse_input)
+        feature = feature.reshape(feature.shape[0], -1)
+        if layer == 0: return feature
+        base = feature
+        cross = feature
+        for i in range(layer):
+            cross = self.crossnet[i](base, cross)
+        return cross
+    
+    @property
+    def _penultimate_dim(self):
+        # input dim of self.linear
+        return self.linear.weight.shape[1]
+    
+    def forward_penultimate(self, sparse_input, dense_input=None):
+        feature = self.embedding_layer(sparse_input)
+        feature = feature.reshape(feature.shape[0], -1)
+        base = feature
+        cross = feature
+        for i in range(self.depth):
+            cross = self.crossnet[i](base, cross)
+        return cross
+    
+    @property
+    def _all_layer_dims(self):
+        return [self.embedding_layer_dim] + [self.linear.weight.shape[1]] * self.depth
+
+    def forward_all_feature(self, sparse_input, dense_input=None):
+        feature = self.embedding_layer(sparse_input)
+        feature = feature.reshape(feature.shape[0], -1)
+        base = feature
+        cross = feature
+        all_features = [cross]
+        for i in range(self.depth):
+            cross = self.crossnet[i](base, cross)
+            all_features.append(cross)
+        return all_features

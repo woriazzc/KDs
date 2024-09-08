@@ -238,3 +238,19 @@ class EulerInteractionLayer(nn.Module):
         if self.apply_norm:
             o_r, o_p = self.norm_r(o_r), self.norm_p(o_p)
         return o_r, o_p
+
+
+class GateCrossLayer(nn.Module):
+    def __init__(self, embedding_dim, feature_stastic):
+        super().__init__()
+        hiddenSize = (len(feature_stastic) - 1) * embedding_dim
+        self.w = nn.Linear(hiddenSize, hiddenSize)
+        self.wg = nn.Linear(hiddenSize, hiddenSize)
+        nn.init.xavier_normal_(self.w.weight, gain=1.414)
+        nn.init.xavier_normal_(self.wg.weight, gain=1.414)
+        
+    def forward(self, base, cross):
+        xw = self.w(cross)  # Feature Crossing
+        xg = torch.sigmoid(self.wg(cross))    # Information Gate
+        result = base * xw * xg + cross
+        return result

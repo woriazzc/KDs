@@ -87,11 +87,13 @@ python -u main_ctr.py --dataset=criteo --backbone=cin --train_teacher --suffix t
 python -u main_ctr.py --dataset=criteo --backbone=xdeepfm --train_teacher --suffix teacher
 python -u main_ctr.py --dataset=criteo --backbone=autoint --train_teacher --suffix teacher
 python -u main_ctr.py --dataset=criteo --backbone=eulernet --train_teacher --suffix teacher
+python -u main_ctr.py --dataset=criteo --backbone=gatecrossnet --train_teacher --suffix teacher
 
 # from scratch
 python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=scratch --suffix student --no_save
 python -u main_ctr.py --dataset=criteo --backbone=dnn --model=scratch --suffix student --no_save
 python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=scratch --suffix student --no_save
+python -u main_ctr.py --dataset=criteo --backbone=gatecrossnet --model=scratch --suffix student --no_save
 
 # KD
 python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=hetd
@@ -102,6 +104,7 @@ python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=clid
 python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=paird
 python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=anyd
 python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=adad
+python -u main_ctr.py --dataset=criteo --backbone=crossnet --model=ofa
 
 python -u main_ctr.py --dataset=criteo --backbone=dnn --model=bced
 python -u main_ctr.py --dataset=criteo --backbone=dnn --model=fitnet
@@ -114,3 +117,6 @@ python -u main_ctr.py --dataset=criteo --backbone=dcnv2 --model=hetd
 python -u main_ctr.py --dataset=criteo --backbone=cin --model=fitnet
 python -u main_ctr.py --dataset=criteo --backbone=cin --model=hetd
 python -u main_ctr.py --dataset=criteo --backbone=cin --model=warmup
+
+python -u main_ctr.py --dataset=criteo --backbone=gatecrossnet --model=fitnet
+python -u main_ctr.py --dataset=criteo --backbone=gatecrossnet --model=bced
