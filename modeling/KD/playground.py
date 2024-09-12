@@ -1103,35 +1103,6 @@ class FreqD(BaseKD4Rec):
         return DE_loss
 
 
-class BCED(BaseKD4CTR):
-    def __init__(self, args, teacher, student):
-        super().__init__(args, teacher, student)
-        self.model_name = "bced"
-
-    def get_loss(self, feature, label):
-        logit_S = self.student(feature)
-        logit_T = self.teacher(feature)
-        y_T = torch.sigmoid(logit_T)
-        loss = F.binary_cross_entropy_with_logits(logit_S, y_T.float())
-        return loss
-
-
-class CLID(BaseKD4CTR):
-    def __init__(self, args, teacher, student):
-        super().__init__(args, teacher, student)
-        self.model_name = "clid"
-
-    def get_loss(self, feature, label):
-        logit_S = self.student(feature).squeeze(1)
-        logit_T = self.teacher(feature).squeeze(1)
-        y_T = torch.sigmoid(logit_T)
-        y_S = torch.sigmoid(logit_S)
-        y_T = y_T / y_T.sum()
-        y_S = y_S / y_S.sum()
-        loss = F.binary_cross_entropy(y_S, y_T)
-        return loss
-
-
 class HetD(BaseKD4CTR):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)

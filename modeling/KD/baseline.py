@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.utils.data as data
 import torch.nn.functional as F
 
-from .utils import Expert, CKA, info_abundance
+from .utils import Expert, CKA, info_abundance, Projector
 from .base_model import BaseKD4Rec, BaseKD4CTR
 
 
@@ -976,7 +976,7 @@ class FitNet(BaseKD4CTR):
                 # For one-stream models
                 teacher_penultimate_dim = self.teacher._penultimate_dim
                 student_penultimate_dim = self.student._penultimate_dim
-                self.projector = nn.Linear(student_penultimate_dim, teacher_penultimate_dim)
+                self.projector = Projector(student_penultimate_dim, teacher_penultimate_dim, 1, norm=False, dropout_rate=0., shallow=False)
             else:
                 # For two-stream models
                 cross_dim, deep_dim = self.teacher._penultimate_dim
@@ -1056,3 +1056,58 @@ class RKD(BaseKD4CTR):
         S_mat = S_emb.mm(S_emb.T)
         T_mat = T_emb.mm(T_emb.T)
         return (S_mat - T_mat).pow(2).mean()
+
+
+class BCED(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "bced"
+
+    def get_loss(self, feature, label):
+        logit_S = self.student(feature)
+        logit_T = self.teacher(feature)
+        y_T = torch.sigmoid(logit_T)
+        loss = F.binary_cross_entropy_with_logits(logit_S, y_T.float())
+        return loss
+
+
+class CLID(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "clid"
+
+    def get_loss(self, feature, label):
+        logit_S = self.student(feature).squeeze(1)
+        logit_T = self.teacher(feature).squeeze(1)
+        y_T = torch.sigmoid(logit_T)
+        y_S = torch.sigmoid(logit_S)
+        y_T = y_T / y_T.sum()
+        y_S = y_S / y_S.sum()
+        loss = F.binary_cross_entropy(y_S, y_T)
+        return loss
+
+
+class OFA(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "ofa"
+        self.beta = args.ofa_beta
+        self.layer_dims = self.student._all_layer_dims
+        self.projectors = nn.ModuleList([nn.Sequential(
+            nn.Linear(dim, dim // 2),
+            nn.ReLU(),
+            nn.Linear(dim // 2, 1)
+        ) for dim in self.layer_dims])
+
+    def get_loss(self, feature, label):
+        logit_S = self.student(feature)
+        logit_T = self.teacher(feature)
+        y_T = torch.sigmoid(logit_T)
+        loss_kd = F.binary_cross_entropy_with_logits(logit_S, y_T)
+        loss_ofa = 0.
+        features = self.student.forward_all_feature(feature)
+        for idx, h in enumerate(features):
+            logit_h = self.projectors[idx](h)
+            loss_ofa += F.binary_cross_entropy_with_logits(logit_h, y_T)
+        loss = loss_kd + loss_ofa * self.beta
+        return loss
