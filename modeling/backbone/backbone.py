@@ -22,7 +22,7 @@ Recommendation Models
 class BPR(BaseRec):
     def __init__(self, dataset, args):
         super(BPR, self).__init__(dataset, args)
-
+        self.model_name = "bpr"
         self.init_std = args.init_std
         self.embedding_dim = args.embedding_dim
 
@@ -113,7 +113,7 @@ class BPR(BaseRec):
 class LightGCN(BaseGCN):
     def __init__(self, dataset, args):
         super(LightGCN, self).__init__(dataset, args)
-        
+        self.model_name = "lightgcn"
         self.embedding_dim = args.embedding_dim
         self.num_layers = args.num_layers
         self.keep_prob = getattr(args, "keep_prob", 0.)
@@ -251,6 +251,7 @@ class LightGCN(BaseGCN):
 class SimpleX(BaseRec):
     def __init__(self, dataset, args):
         super().__init__(dataset, args)
+        self.model_name = "simplex"
         self.init_std = args.init_std
         self.embedding_dim = args.embedding_dim
         self.aggregator = "mean"    # Only support arrgregator='mean', which performs best in the paper
@@ -401,6 +402,7 @@ CTR Prediction Models
 class FM(BaseCTR):
     def __init__(self, args, feature_stastic):
         super().__init__(args, feature_stastic)
+        self.model_name = "fm"
         self.one_order = LR(feature_stastic)
     
     def FeatureInteraction(self, dense_input, sparse_input):
@@ -412,6 +414,7 @@ class FM(BaseCTR):
 class DeepFM(BaseCTR):
     def __init__(self, args, feature_stastic):
         super().__init__(args, feature_stastic)
+        self.model_name = "deepfm"
         self.hidden_dims = args.hidden_dims
         self.dropout = args.dropout
         self.one_order = LR(feature_stastic)
@@ -426,6 +429,7 @@ class DeepFM(BaseCTR):
 class DNN(BaseCTR):
     def __init__(self, args, feature_stastic):
         super().__init__(args, feature_stastic)
+        self.model_name = "dnn"
         self.hidden_dims = args.hidden_dims
         self.dropout = args.dropout
         self.mlp = MLP(self.embedding_dim, feature_stastic, self.hidden_dims, self.dropout)
@@ -469,6 +473,7 @@ class DNN(BaseCTR):
 class CrossNet(BaseCTR):
     def __init__(self, args, feature_stastic):
         super().__init__(args, feature_stastic)
+        self.model_name = "crossnet"
         self.depth = args.depth
         self.crossnet = nn.ModuleList([CrossNetComp(self.embedding_dim, feature_stastic) for i in range(self.depth)])
         self.linear = nn.Linear((len(feature_stastic) - 1) * self.embedding_dim, 1)
@@ -532,6 +537,7 @@ class CrossNet(BaseCTR):
 class DCNV2(BaseCTR):
     def __init__(self, args, feature_stastic):
         super().__init__(args, feature_stastic)
+        self.model_name = "dcnv2"
         self.hidden_dims = args.hidden_dims
         self.dropout = args.dropout
         self.depth = args.depth
@@ -567,6 +573,7 @@ class DCNV2(BaseCTR):
 class DAGFM(BaseCTR):
     def __init__(self, args, feature_stastic):
         super().__init__(args, feature_stastic)
+        self.model_name = "dagfm"
         self.type = args.type
         self.depth = args.depth
         field_num = len(feature_stastic) - 1
@@ -607,6 +614,7 @@ class DAGFM(BaseCTR):
 class CIN(BaseCTR):
     def __init__(self, args, feature_stastic):
         super().__init__(args, feature_stastic)
+        self.model_name = "cin"
         self.cin_dims = args.cin_dims
         self.cinlist = [len(feature_stastic) - 1] + self.cin_dims
         self.cin = nn.ModuleList([CINComp(self.cinlist[i], self.cinlist[i + 1], feature_stastic) for i in range(0, len(self.cinlist) - 1)])
@@ -653,6 +661,7 @@ class CIN(BaseCTR):
 class XDeepFM(BaseCTR):
     def __init__(self, args, feature_stastic):
         super().__init__(args, feature_stastic)
+        self.model_name = "xdeepfm"
         self.hidden_dims = args.hidden_dims
         self.dropout = args.dropout
         self.cin_dims = args.cin_dims
@@ -680,6 +689,7 @@ class XDeepFM(BaseCTR):
 class CrossCIN(BaseCTR):
     def __init__(self, args, feature_stastic):
         super().__init__(args, feature_stastic)
+        self.model_name = "crosscin"
         self.crossnet = CrossNet(args, feature_stastic)
         self.cin = CIN(args, feature_stastic)
     
@@ -692,6 +702,7 @@ class CrossCIN(BaseCTR):
 class AutoInt(BaseCTR):
     def __init__(self, args, feature_stastic):
         super().__init__(args, feature_stastic)
+        self.model_name = "autoint"
         self.headNum = args.num_head
         self.LayerNum = args.depth
         self.att_emb = args.attention_dim
@@ -715,6 +726,7 @@ class AutoInt(BaseCTR):
 class EulerNet(BaseCTR):
     def __init__(self, args, feature_stastic):
         super().__init__(args, feature_stastic)
+        self.model_name = "eulernet"
         self.order_list = args.order_list
         self.apply_norm = args.eulernet_norm
         self.drop_ex = args.eulernet_dropex
@@ -743,6 +755,7 @@ class EulerNet(BaseCTR):
 class GateCrossNet(BaseCTR):
     def __init__(self, args, feature_stastic):
         super().__init__(args, feature_stastic)
+        self.model_name = "gatecrossnet"
         self.depth = args.depth
         self.crossnet = nn.ModuleList([GateCrossLayer(self.embedding_dim, feature_stastic) for i in range(self.depth)])
         self.linear = nn.Linear((len(feature_stastic) - 1) * self.embedding_dim, 1)

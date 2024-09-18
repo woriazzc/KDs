@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph, CKA, info_abundance
+from .utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph, CKA, info_abundance, log_rsd
 from .base_model import BaseKD4Rec, BaseKD4CTR
 from .baseline import DE
 
@@ -1124,12 +1124,12 @@ class HetD(BaseKD4CTR):
         self.adaptor = nn.Linear(teacher_penultimate_dim, teacher_penultimate_dim)
         self.predictor = nn.Linear(teacher_penultimate_dim, 1)
     
-    def do_something_in_each_epoch(self, epoch):
-        if self.verbose:
-            if epoch > 0 and not self.cka is None:
-                print(self.cka)
-            self.cka = None
-            self.cnt = 0
+    # def do_something_in_each_epoch(self, epoch):
+    #     if self.verbose:
+    #         if epoch > 0 and not self.cka is None:
+    #             print(self.cka)
+    #         self.cka = None
+    #         self.cnt = 0
     
     def get_loss(self, data, label):
         S_emb = self.student.forward_penultimate(data)
@@ -1145,37 +1145,37 @@ class HetD(BaseKD4CTR):
         loss_adaptor = F.binary_cross_entropy_with_logits(T_logits.squeeze(-1), label.squeeze(-1).float()) + self.beta * F.binary_cross_entropy_with_logits(T_logits.squeeze(-1), S_pred.detach().squeeze(-1))
         loss = (T_emb.detach() - S_emb).pow(2).sum(-1).mean() + loss_adaptor / (self.lmbda + 1e-8) * self.gamma
 
-        if self.verbose and self.cnt < 5:
-            # # calculate CKA
-            # with torch.no_grad():
-            #     S_embs = self.student.forward_all_feature(data)
-            #     T_embs = self.teacher.forward_all_feature(data)
-            #     T_embs += [T_emb.detach()]
-            #     CKA_mat = np.zeros((len(T_embs), len(S_embs)))
-            #     for id_T, T_emb in enumerate(T_embs):
-            #         for id_S, S_emb in enumerate(S_embs):
-            #             CKA_mat[id_T, id_S] = CKA(T_emb, S_emb).item()
-            #     if self.cka is None:
-            #         self.cka = CKA_mat
-            #     else:
-            #         self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
-            #         self.cnt += 1
+        # if self.verbose and self.cnt < 5:
+        #     # # calculate CKA
+        #     # with torch.no_grad():
+        #     #     S_embs = self.student.forward_all_feature(data)
+        #     #     T_embs = self.teacher.forward_all_feature(data)
+        #     #     T_embs += [T_emb.detach()]
+        #     #     CKA_mat = np.zeros((len(T_embs), len(S_embs)))
+        #     #     for id_T, T_emb in enumerate(T_embs):
+        #     #         for id_S, S_emb in enumerate(S_embs):
+        #     #             CKA_mat[id_T, id_S] = CKA(T_emb, S_emb).item()
+        #     #     if self.cka is None:
+        #     #         self.cka = CKA_mat
+        #     #     else:
+        #     #         self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
+        #     #         self.cnt += 1
 
-            # calculate information abundance
-            with torch.no_grad():
-                S_emb = self.student.forward_penultimate(data)
-                T_emb = self.teacher.forward_penultimate(data)
-                S_emb = S_emb.reshape(S_emb.shape[0], -1)
-                T_emb = T_emb.reshape(T_emb.shape[0], -1)
-                info_S = info_abundance(S_emb)
-                info_T = info_abundance(T_emb)
-                print(info_S, info_T, end=" ")
-                S_emb = self.projector(S_emb)
-                T_emb = self.adaptor(T_emb)
-                info_S = info_abundance(S_emb)
-                info_T = info_abundance(T_emb)
-                print(info_S, info_T)
-                self.cnt += 1
+        #     # calculate information abundance
+        #     with torch.no_grad():
+        #         S_emb = self.student.forward_penultimate(data)
+        #         T_emb = self.teacher.forward_penultimate(data)
+        #         S_emb = S_emb.reshape(S_emb.shape[0], -1)
+        #         T_emb = T_emb.reshape(T_emb.shape[0], -1)
+        #         info_S = info_abundance(S_emb)
+        #         info_T = info_abundance(T_emb)
+        #         print(info_S, info_T, end=" ")
+        #         S_emb = self.projector(S_emb)
+        #         T_emb = self.adaptor(T_emb)
+        #         info_S = info_abundance(S_emb)
+        #         info_T = info_abundance(T_emb)
+        #         print(info_S, info_T)
+        #         self.cnt += 1
         
         return loss
 

@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.utils.data as data
 import torch.nn.functional as F
 
-from .utils import Expert, CKA, info_abundance, Projector
+from .utils import Expert, CKA, info_abundance, Projector, log_rsd, log_norm, save_embedding, log_mmd
 from .base_model import BaseKD4Rec, BaseKD4CTR
 
 
@@ -950,6 +950,15 @@ class HetComp(BaseKD4Rec):
         return loss
 
 
+class NoKD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "nokd"
+    
+    def get_loss(self, data, label):
+        return torch.tensor(0.).cuda()
+
+
 class WarmUp(BaseKD4CTR):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
@@ -988,13 +997,13 @@ class FitNet(BaseKD4CTR):
         else:
             raise ValueError
         
-    def do_something_in_each_epoch(self, epoch):
-        self.epoch = epoch
-        if self.verbose:
-            if epoch > 0 and not self.cka is None:
-                print(self.cka)
-            self.cka = None
-            self.cnt = 0
+    # def do_something_in_each_epoch(self, epoch):
+    #     self.epoch = epoch
+    #     if self.verbose:
+    #         if epoch > 0 and not self.cka is None:
+    #             print(self.cka)
+    #         self.cka = None
+    #         self.cnt = 0
     
     def get_loss(self, data, label):
         if self.layer == "embedding":
@@ -1019,28 +1028,28 @@ class FitNet(BaseKD4CTR):
             loss = torch.tensor(0.).cuda()
         else: raise ValueError
 
-        if self.verbose and self.cnt < 5:
-            # # calculate CKA
-            # with torch.no_grad():
-            #     S_embs = self.student.forward_all_feature(data)
-            #     T_embs = self.teacher.forward_all_feature(data)
-            #     CKA_mat = np.zeros((len(T_embs), len(S_embs)))
-            #     for id_T, T_emb in enumerate(T_embs):
-            #         for id_S, S_emb in enumerate(S_embs):
-            #             CKA_mat[id_T, id_S] = CKA(T_emb, S_emb).item()
-            #     if self.cka is None:
-            #         self.cka = CKA_mat
-            #     else:
-            #         self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
-            #         self.cnt += 1
+        # if self.verbose and self.cnt < 5:
+        #     # # calculate CKA
+        #     # with torch.no_grad():
+        #     #     S_embs = self.student.forward_all_feature(data)
+        #     #     T_embs = self.teacher.forward_all_feature(data)
+        #     #     CKA_mat = np.zeros((len(T_embs), len(S_embs)))
+        #     #     for id_T, T_emb in enumerate(T_embs):
+        #     #         for id_S, S_emb in enumerate(S_embs):
+        #     #             CKA_mat[id_T, id_S] = CKA(T_emb, S_emb).item()
+        #     #     if self.cka is None:
+        #     #         self.cka = CKA_mat
+        #     #     else:
+        #     #         self.cka = (self.cka * self.cnt + CKA_mat) / (self.cnt + 1)
+        #     #         self.cnt += 1
 
-            # calculate information abundance
-            with torch.no_grad():
-                info_S = info_abundance(S_emb)
-                info_T = info_abundance(T_emb)
-                info_S_proj = info_abundance(S_emb_proj)
-                print(f"infoS:{info_S:.2f}, infoT:{info_T:.2f}, infoS_proj:{info_S_proj:.2f}")
-                self.cnt += 1
+        #     # calculate information abundance
+        #     with torch.no_grad():
+        #         info_S = info_abundance(S_emb)
+        #         info_T = info_abundance(T_emb)
+        #         info_S_proj = info_abundance(S_emb_proj)
+        #         print(f"infoS:{info_S:.2f}, infoT:{info_T:.2f}, infoS_proj:{info_S_proj:.2f}")
+        #         self.cnt += 1
         return loss
 
 
