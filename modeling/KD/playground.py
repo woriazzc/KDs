@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph, CKA, info_abundance, log_rsd
+from .utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph, CKA, info_abundance, log_mmd, TCA, MMD_loss
 from .base_model import BaseKD4Rec, BaseKD4CTR
 from .baseline import DE
 
@@ -1539,3 +1539,163 @@ class attachD(BaseKD4CTR):
         kd_loss = self.get_loss(data, label)
         loss = kd_loss
         return loss, base_loss.detach(), kd_loss.detach()
+
+
+class TCAD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "tcad"
+        self.layer = args.tcad_layer
+        self.lmbda = args.tcad_lmbda
+        self.K = args.tcad_K
+        self.verbose = args.verbose
+        self.ablation = args.ablation
+        if self.layer == "embedding":
+            self.tca = TCA(self.student.embedding_layer_dim, self.lmbda, self.K)
+            self.projector = Projector(self.student.embedding_layer_dim, self.teacher.embedding_layer_dim, 1, norm=False, dropout_rate=0., shallow=True)
+        elif self.layer == "penultimate":
+            self.tca = TCA(self.student._penultimate_dim, self.lmbda, self.K, False)
+            self.projector = Projector(self.student._penultimate_dim, self.teacher._penultimate_dim, 1, norm=False, dropout_rate=0., shallow=True)
+        elif self.layer == "none":
+            pass
+        else:
+            raise ValueError
+        self.step = 0
+    
+    def get_loss(self, data, label):
+        if self.layer == "embedding":
+            S_emb = self.student.forward_embed(data)
+            S_emb = S_emb.reshape(S_emb.shape[0], -1)
+            T_emb = self.teacher.forward_embed(data)
+            T_emb = T_emb.reshape(T_emb.shape[0], -1)
+        elif self.layer == "penultimate":
+            S_emb = self.student.forward_penultimate(data)
+            T_emb = self.teacher.forward_penultimate(data)
+        if self.layer in ["embedding", "penultimate"]:
+            if self.ablation:
+                S_emb_adapt = S_emb / torch.linalg.norm(S_emb, dim=-1, keepdim=True).detach()
+                T_emb_adapt = T_emb / torch.linalg.norm(T_emb, dim=-1, keepdim=True).detach()
+            else:
+                if self.step % 500 == 0:
+                    # S_emb_pos, S_emb_neg = S_emb[label == 1], S_emb[label == 0]
+                    # T_emb_pos, T_emb_neg = T_emb[label == 1], T_emb[label == 0]
+                    # S_emb_pos_adapt, T_emb_pos_adapt = self.tca.fit_transform(S_emb_pos, T_emb_pos)
+                    # S_emb_neg_adapt, T_emb_neg_adapt = self.tca.fit_transform(S_emb_neg, T_emb_neg)
+                    S_emb_adapt, T_emb_adapt = self.tca.fit_transform(S_emb, T_emb, label)
+                    loss = (T_emb_adapt.detach() - S_emb_adapt).pow(2).sum(-1).mean()
+                    mmd = MMD_loss()(S_emb_adapt[-512:], T_emb_adapt[-512:])
+                    # mmd_pos = MMD_loss()(S_emb_pos_adapt[-512:], T_emb_pos_adapt[-512:])
+                    # mmd_neg = MMD_loss()(S_emb_neg_adapt[-512:], T_emb_neg_adapt[-512:])
+                    if self.verbose:
+                        mlflow.log_metrics({"mmd":mmd.item()}, step=self.step)
+                        mlflow.log_metrics({"info_S_emb":info_abundance(S_emb), "info_T_emb":info_abundance(T_emb), "info_S_adapt":info_abundance(S_emb_adapt), "info_T_adapt":info_abundance(T_emb_adapt)}, step=self.step)
+                        # mlflow.log_metrics({"info_S_emb_pos":info_abundance(S_emb_pos), "info_T_emb_pos":info_abundance(T_emb_pos), "info_S_pos_adapt":info_abundance(S_emb_pos_adapt), "info_T_pos_adapt":info_abundance(T_emb_pos_adapt)}, step=self.step)
+                        # mlflow.log_metrics({"info_S_emb_neg":info_abundance(S_emb_neg), "info_T_emb_neg":info_abundance(T_emb_neg), "info_S_neg_adapt":info_abundance(S_emb_neg_adapt), "info_T_neg_adapt":info_abundance(T_emb_neg_adapt)}, step=self.step)
+                else:
+                    loss = torch.tensor(0.).cuda()
+                self.step += 1
+        elif self.layer == "none":
+            loss = torch.tensor(0.).cuda()
+        else: raise ValueError
+        return loss
+
+
+class DAND(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "dand"
+        self.layer = args.dand_layer
+        self.K = args.dand_K
+        self.kernel_type = args.kernel_type
+        self.ablation = args.ablation
+        if self.layer == "embedding":
+            self.mmd = MMD_loss(self.kernel_type)
+            self.projector = Projector(self.student.embedding_layer_dim, self.teacher.embedding_layer_dim, 1, norm=False, dropout_rate=0., shallow=True)
+        elif self.layer == "penultimate":
+            self.mmd = MMD_loss(self.kernel_type)
+            self.projector = Projector(self.student._penultimate_dim, self.teacher._penultimate_dim, 1, norm=False, dropout_rate=0., shallow=True)
+        elif self.layer == "none":
+            pass
+        else:
+            raise ValueError
+    
+    def get_loss(self, data, label):
+        if self.layer == "embedding":
+            S_emb = self.student.forward_embed(data)
+            S_emb = S_emb.reshape(S_emb.shape[0], -1)
+            T_emb = self.teacher.forward_embed(data)
+            T_emb = T_emb.reshape(T_emb.shape[0], -1)
+        elif self.layer == "penultimate":
+            S_emb = self.student.forward_penultimate(data)
+            T_emb = self.teacher.forward_penultimate(data)
+        if self.layer in ["embedding", "penultimate"]:
+            S_emb_proj = self.projector(S_emb)
+            if self.ablation:
+                loss = (T_emb - S_emb_proj).pow(2).sum(-1).mean()
+            else:
+                if self.kernel_type == "linear":
+                    loss = self.mmd(S_emb_proj, T_emb)
+                else:
+                    loss = self.mmd(S_emb_proj[:self.K], T_emb[:self.K])
+        elif self.layer == "none":
+            loss = torch.tensor(0.).cuda()
+        else: raise ValueError
+        return loss
+
+
+class MixD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "mixd"
+        self.layer = args.mixd_layer
+        self.K = args.mixd_K
+        self.kernel_type = args.kernel_type
+        self.verbose = args.verbose
+        self.ablation = args.ablation
+        if self.layer == "embedding":
+            self.mmd = MMD_loss(self.kernel_type)
+            self.projector_pos = Projector(self.student.embedding_layer_dim, self.teacher.embedding_layer_dim, 1, norm=False, dropout_rate=0., shallow=True)
+            self.projector_neg = Projector(self.student.embedding_layer_dim, self.teacher.embedding_layer_dim, 1, norm=False, dropout_rate=0., shallow=True)
+        elif self.layer == "penultimate":
+            self.mmd = MMD_loss(self.kernel_type)
+            self.projector_pos = Projector(self.student._penultimate_dim, self.teacher._penultimate_dim, 1, norm=False, dropout_rate=0., shallow=True)
+            self.projector_neg = Projector(self.student._penultimate_dim, self.teacher._penultimate_dim, 1, norm=False, dropout_rate=0., shallow=True)
+        elif self.layer == "none":
+            pass
+        else:
+            raise ValueError
+    
+    def _cal_loss(self, S_emb, T_emb, projector):
+        S_emb_proj = projector(S_emb)
+        if self.ablation:
+            loss = (T_emb - S_emb_proj).pow(2).sum(-1).mean()
+            return loss
+        if self.kernel_type == "linear":
+            loss = self.mmd(S_emb_proj, T_emb)
+        else:
+            loss = self.mmd(S_emb_proj[:self.K], T_emb[:self.K])
+        return loss
+    
+    def get_loss(self, data, label):
+        if self.layer == "embedding":
+            S_emb = self.student.forward_embed(data)
+            S_emb = S_emb.reshape(S_emb.shape[0], -1)
+            T_emb = self.teacher.forward_embed(data)
+            T_emb = T_emb.reshape(T_emb.shape[0], -1)
+        elif self.layer == "penultimate":
+            S_emb = self.student.forward_penultimate(data)
+            T_emb = self.teacher.forward_penultimate(data)
+        if self.layer in ["embedding", "penultimate"]:
+            idx_pos = torch.argwhere(label == 1).squeeze(-1)
+            idx_neg = torch.argwhere(label == 0).squeeze(-1)
+            S_emb_pos, S_emb_neg = S_emb[idx_pos], S_emb[idx_neg]
+            T_emb_pos, T_emb_neg = T_emb[idx_pos], T_emb[idx_neg]
+            loss_pos = self._cal_loss(S_emb_pos, T_emb_pos, self.projector_pos)
+            loss_neg = self._cal_loss(S_emb_neg, T_emb_neg, self.projector_neg)
+            loss = (loss_pos + loss_neg) * 0.5
+            if self.verbose:
+                mlflow.log_metrics({"loss_pos":loss_pos.item(), "loss_neg":loss_neg.item()})
+        elif self.layer == "none":
+            loss = torch.tensor(0.).cuda()
+        else: raise ValueError
+        return loss

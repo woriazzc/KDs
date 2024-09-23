@@ -207,37 +207,53 @@ def save_embedding(func):
 
 
 class MMD_loss(nn.Module):
-    def __init__(self, kernel_mul=2.0, kernel_num=5):
-        super(MMD_loss, self).__init__()
+    def __init__(self, kernel_type='rbf', kernel_mul=2.0, kernel_num=5):
+        super().__init__()
         self.kernel_num = kernel_num
         self.kernel_mul = kernel_mul
         self.fix_sigma = None
-    
-    def guassian_kernel(self, source, target, kernel_mul=2.0, kernel_num=5, fix_sigma=None):
+        self.kernel_type = kernel_type
+
+    def guassian_kernel(self, source, target, kernel_mul, kernel_num, fix_sigma):
         n_samples = int(source.size()[0]) + int(target.size()[0])
         total = torch.cat([source, target], dim=0)
-
-        total0 = total.unsqueeze(0).expand(int(total.size(0)), int(total.size(0)), int(total.size(1)))
-        total1 = total.unsqueeze(1).expand(int(total.size(0)), int(total.size(0)), int(total.size(1)))
+        total0 = total.unsqueeze(0).expand(
+            int(total.size(0)), int(total.size(0)), int(total.size(1)))
+        total1 = total.unsqueeze(1).expand(
+            int(total.size(0)), int(total.size(0)), int(total.size(1)))
         L2_distance = ((total0 - total1) ** 2).sum(2)
         if fix_sigma:
             bandwidth = fix_sigma
         else:
             bandwidth = torch.sum(L2_distance.data) / (n_samples ** 2 - n_samples)
         bandwidth /= kernel_mul ** (kernel_num // 2)
-        bandwidth_list = [bandwidth * (kernel_mul ** i) for i in range(kernel_num)]
-        kernel_val = [torch.exp(-L2_distance / bandwidth_temp) for bandwidth_temp in bandwidth_list]
+        bandwidth_list = [bandwidth * (kernel_mul**i)
+                          for i in range(kernel_num)]
+        kernel_val = [torch.exp(-L2_distance / bandwidth_temp)
+                      for bandwidth_temp in bandwidth_list]
         return sum(kernel_val)
 
-    def forward(self, source, target):
-        batch_size = int(source.size()[0])
-        kernels = self.guassian_kernel(source, target, kernel_mul=self.kernel_mul, kernel_num=self.kernel_num, fix_sigma=self.fix_sigma)
-        XX = kernels[:batch_size, :batch_size]
-        YY = kernels[batch_size:, batch_size:]
-        XY = kernels[:batch_size, batch_size:]
-        YX = kernels[batch_size:, :batch_size]
-        loss = torch.mean(XX + YY - XY -YX)
+    def linear_mmd2(self, f_of_X, f_of_Y):
+        loss = 0.0
+        delta = f_of_X.float().mean(0) - f_of_Y.float().mean(0)
+        loss = delta.pow(2).sum()
         return loss
+
+    def forward(self, source, target):
+        if self.kernel_type == 'linear':
+            return self.linear_mmd2(source, target)
+        elif self.kernel_type == 'rbf':
+            batch_size = int(source.size()[0])
+            kernels = self.guassian_kernel(
+                source, target, kernel_mul=self.kernel_mul, kernel_num=self.kernel_num, fix_sigma=self.fix_sigma)
+            XX = torch.mean(kernels[:batch_size, :batch_size])
+            YY = torch.mean(kernels[batch_size:, batch_size:])
+            XY = torch.mean(kernels[:batch_size, batch_size:])
+            YX = torch.mean(kernels[batch_size:, :batch_size])
+            loss = torch.mean(XX + YY - XY - YX)
+            return loss
+        else:
+            raise NotImplementedError("Unexpected kernel_type.")
 
 
 def log_mmd(func):
@@ -260,48 +276,59 @@ def log_mmd(func):
     return wrapper
 
 
-# https://github.com/MaterialsInformaticsDemo/TCA/blob/main/Python/TCA.py
-class TCA():
-    def __init__(self, dim=30, lamda=1, gamma=1):
+# https://github.com/jindongwang/transferlearning/blob/master/code/traditional/JDA/JDA.py
+class TCA:
+    def __init__(self, dim=20, lmbda=1, K=512, norm=True):
         '''
-        :param dim: data dimension after projection
-        :param lamb: lambda value, Lagrange multiplier
-        :param gamma: length scale for rbf kernel
+        Init func
+        :param dim: dimension after transfer
+        :param lmbda: lambda value in equation
+        :param K: number of samples for trunctation
         '''
         self.dim = dim
-        self.lamda = lamda
-        self.kernel = 0.5 * RBF(gamma, "fixed")
+        self.lmbda = lmbda
+        self.K = K
+        self.norm = norm
 
-    def fit(self, Xs, Xt):
+    def fit_transform(self, X_s, X_t, label_o):
         '''
-        :param Xs: ns * m_feature, source domain data 
-        :param Xt: nt * m_feature, target domain data
-        Projecting Xs and Xt to a lower dimension by TCA
-        source/target domain data expressed in a mapping space
-        :return: Xs_new and Xt_new 
+        :param Xs: ns * n_feature, source feature
+        :param Xt: nt * n_feature, target feature
+        :return: Xs_new, Xt_new
         '''
-        # formular in paper Domain Adaptation via Transfer Component Analysis
-        # Eq.(2)
-        X = np.vstack((Xs, Xt))
-        K = self.kernel(X)
-        # cal matrix L
+        Xs = X_s[:self.K].detach().cpu().numpy()
+        Xt = X_t[:self.K].detach().cpu().numpy()
+        label = label_o[:self.K].detach().cpu().numpy()
+        X = np.hstack((Xs.T, Xt.T))
+        if self.norm:
+            X /= np.linalg.norm(X, axis=0)    # Layer normalize
+        m, n = X.shape
         ns, nt = len(Xs), len(Xt)
-        if self.dim > (ns + nt):
-            raise ValueError('The maximum number of dimensions should be smaller than', (ns + nt))
         e = np.vstack((1 / ns * np.ones((ns, 1)), -1 / nt * np.ones((nt, 1))))
-        L = e * e.T
-        # cal centering matrix H page 202 the last pargraph at left side
-        n, _ = X.shape
         H = np.eye(n) - 1 / n * np.ones((n, n))
-        # page 202 the last pargraph at right side
-        matrix = np.linalg.inv(K @ L @ K + self.lamda * np.eye(n)) @ K @ H @ K
-        # cal eigenvalues : w, eigenvectors : V
-        w, V = scipy.linalg.eig(matrix)
-        w, V = w.real, V.real
-        # peak out the first self.dim components
-        ind = np.argsort(abs(w))[::-1]
-        A = V[:, ind[:self.dim]]
-        # output the mapped data
-        Z = K @ A
-        Xs_new, Xt_new = Z[:ns, :], Z[ns:, :]
-        return Xs_new, Xt_new
+        M = e * e.T * 2
+        for c in [0, 1]:
+            e = np.zeros((n, 1))
+            tt = (label == c)
+            ind = np.where(tt == True)
+            e[ind] = 1 / len(label[ind])
+            inds = [item + ns for item in ind]
+            e[tuple(inds)] = -1 / len(label[ind])
+            e[np.isinf(e)] = 0
+            M = M + np.dot(e, e.T)
+        M = M / np.linalg.norm(M, 'fro')
+        n_eye = m
+        a, b = np.linalg.multi_dot([X, M, X.T]) + self.lmbda * np.eye(n_eye), np.linalg.multi_dot([X, H, X.T])
+        w, V = scipy.linalg.eig(a, b)
+        ind = np.argsort(w)
+        A = V[:, ind[:self.dim]]    # n_feature, dim
+        A = torch.from_numpy(A).to(X_s.device).to(X_s.dtype)
+        if self.norm:
+            X_s_new = (X_s / torch.linalg.norm(X_s, dim=-1, keepdim=True).detach()).mm(A)
+            X_t_new = (X_t / torch.linalg.norm(X_t, dim=-1, keepdim=True).detach()).mm(A)
+            X_s_new /= torch.linalg.norm(X_s_new, dim=-1, keepdim=True).detach()
+            X_t_new /= torch.linalg.norm(X_t_new, dim=-1, keepdim=True).detach()
+        else:
+            X_s_new = X_s.mm(A)
+            X_t_new = X_t.mm(A)
+        return X_s_new, X_t_new

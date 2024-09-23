@@ -1,0 +1,8 @@
+epochs: 1000
+batch_size: 10000
+lr: 1.e-3
+lmbda: 1
+
+dand_layer: penultimate
+kernel_type: linear
+dand_K: 512

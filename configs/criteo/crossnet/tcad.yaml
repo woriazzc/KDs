@@ -1,0 +1,8 @@
+epochs: 1000
+batch_size: 10000
+lr: 1.e-3
+lmbda: 1
+
+tcad_layer: penultimate
+tcad_lmbda: 1.0
+tcad_K: 512

@@ -985,7 +985,7 @@ class FitNet(BaseKD4CTR):
                 # For one-stream models
                 teacher_penultimate_dim = self.teacher._penultimate_dim
                 student_penultimate_dim = self.student._penultimate_dim
-                self.projector = Projector(student_penultimate_dim, teacher_penultimate_dim, 1, norm=False, dropout_rate=0., shallow=False)
+                self.projector = Projector(student_penultimate_dim, teacher_penultimate_dim, 1, norm=False, dropout_rate=0., shallow=True)
             else:
                 # For two-stream models
                 cross_dim, deep_dim = self.teacher._penultimate_dim
