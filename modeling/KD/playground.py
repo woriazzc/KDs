@@ -1668,10 +1668,10 @@ class MixD(BaseKD4CTR):
     def _cal_loss(self, S_emb, T_emb, projector):
         S_emb_proj = projector(S_emb)
         if self.ablation:
-            loss = (T_emb - S_emb_proj).pow(2).sum(-1).mean()
+            loss = (T_emb[:self.K] - S_emb_proj[:self.K]).pow(2).sum(-1).mean()
             return loss
         if self.kernel_type == "linear":
-            loss = self.mmd(S_emb_proj, T_emb)
+            loss = self.mmd(S_emb_proj[:self.K], T_emb[:self.K])
         else:
             loss = self.mmd(S_emb_proj[:self.K], T_emb[:self.K])
         return loss
@@ -1699,3 +1699,223 @@ class MixD(BaseKD4CTR):
             loss = torch.tensor(0.).cuda()
         else: raise ValueError
         return loss
+
+
+class RSD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "rsd"
+        self.ratio = args.rsd_ratio
+    
+    def cal_rsd(self, X, Y):
+        Us, Ss, Vs = torch.svd(X)
+        Ut, St, Vt = torch.svd(Y)
+        total_Ss, total_St = torch.sum(Ss), torch.sum(St)
+        cumu_Ss, cumu_St = torch.cumsum(Ss, dim=0), torch.cumsum(St, dim=0)
+        thresh_s, thresh_t = self.ratio * total_Ss, self.ratio * total_St
+        K_s, K_t = torch.where(cumu_Ss >= thresh_s)[0][0] + 1, torch.where(cumu_St >= thresh_t)[0][0] + 1
+        Us, Ut = Us[:, :K_s], Ut[:, :K_t]
+        Ps, cospa, Pt = torch.svd(torch.mm(Us.T, Ut))
+        cospa = torch.minimum(cospa, torch.tensor(1.))
+        sinpa = torch.sqrt(1. - torch.pow(cospa, 2))
+        rsd = torch.norm(sinpa, 1)
+        # bmp = torch.norm(Ps.abs() - Pt.abs(), 2)
+        dis = rsd
+        return dis
+    
+    def get_loss(self, data, label):
+        S_emb = self.student.forward_penultimate(data)
+        T_emb = self.teacher.forward_penultimate(data)
+        loss = self.cal_rsd(S_emb, T_emb)
+        return loss
+
+
+class PCAD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "pcad"
+        self.SK = args.pcad_SK
+        self.TK = args.pcad_TK
+        self.Sr = args.pcad_Sr
+        self.Tr = args.pcad_Tr
+        self.projector = Projector(self.SK, self.TK, 1, norm=False, dropout_rate=0., shallow=True)
+
+    def pca_with_grad(self, X, K, rat):
+        # Xc = X - X.mean(0, keepdims=True)
+        U, S, V = torch.svd_lowrank(X, K)
+        S_smooth = S.clone()
+        S_smooth[:math.ceil(K * rat)] = S[:math.ceil(K * rat)].mean()
+        Y = U.mm(torch.diag(S_smooth))
+        return Y
+    
+    def get_loss(self, data, label):
+        S_emb = self.student.forward_penultimate(data)
+        T_emb = self.teacher.forward_penultimate(data)
+        S_emb = self.pca_with_grad(S_emb, self.SK, self.Sr)
+        T_emb = self.pca_with_grad(T_emb, self.TK, self.Tr)
+        S_emb_proj = self.projector(S_emb)
+        loss = (T_emb - S_emb_proj).pow(2).sum(-1).mean()
+        return loss
+
+
+class CCD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "ccd"
+        self.SK = args.ccd_SK
+        self.TK = args.ccd_TK
+        self.beta = args.ccd_beta
+        self.projector = Projector(self.SK, self.TK, 1, norm=False, dropout_rate=0., shallow=True)
+    
+    def get_loss(self, data, label):
+        S_emb = self.student.forward_penultimate(data)
+        T_emb = self.teacher.forward_penultimate(data)
+        S_emb = S_emb - S_emb.mean(0, keepdims=True)
+        T_emb = T_emb - T_emb.mean(0, keepdims=True)
+        Us, Ss, Vs = torch.svd_lowrank(S_emb, self.SK)
+        Ut, St, Vt = torch.svd_lowrank(T_emb, self.TK)
+        # Us, Ss, Vs = torch.svd(S_emb)
+        # Ut, St, Vt = torch.svd(T_emb)
+        # Us, Ss, Vs = Us[:, :self.SK], Ss[:self.SK], Vs[:, :self.SK]
+        # Ut, St, Vt = Ut[:, :self.TK], St[:self.TK], Vt[:, :self.TK]
+        
+        # Ys = Us.mm(torch.diag(Ss))     # bs, SK
+        # Yt = Ut.mm(torch.diag(St))     # bs, TK
+        # loss1 = self.projector(Ys.detach()).pow(2).sum() + Yt.pow(2).sum()
+        # # mlflow.log_metric("rk_proj", info_abundance(self.projector.experts[0].mlp[0].weight.data))
+        # vec_t = Ut                  # bs, TK
+        # # Ss_smooth = Ss.detach().clone()
+        # # Ss_smooth[:math.ceil(self.SK * 0.3)] = Ss[:math.ceil(self.SK * 0.3)].mean()
+        # # Us = Us * Ss_smooth.unsqueeze(0)   # bs, SK
+        # vec_s = self.projector(Us)  # bs, TK
+
+        # vec_t = vec_t / torch.norm(vec_t, dim=0, keepdim=True)
+        # vec_s = vec_s / torch.norm(vec_s, dim=0, keepdim=True)
+        # cos_mat = torch.diag(vec_t.T.mm(vec_s))     # TK,
+        # sin_mat = torch.sqrt(1. - torch.pow(torch.minimum(cos_mat, torch.tensor(1.)), 2))
+        # # St_smooth = St.clone()
+        # # St_smooth[:math.ceil(self.TK * 0.2)] = St[:math.ceil(self.TK * 0.2)].mean()
+
+        # # d = {f"sin_{i}":sin_mat[i].item() for i in range(10)}
+        # # mlflow.log_metrics(d)
+
+        # # St[10:] = 0
+        # # St[[1, 2, 6, 7, 8, 9]] = 0
+        # # St[1:] = 0
+
+        idx = [0]
+        cos_mat = torch.diag(Ut[:, idx].T.mm(Us[:, idx]))
+        sin_mat = torch.sqrt(1. - torch.pow(torch.minimum(cos_mat, torch.tensor(1.)), 2))
+        mlflow.log_metric("sin_00", sin_mat.mean().item())
+        mlflow.log_metric("St", St[idx].mean().item())
+        mlflow.log_metric("Ss", Ss[idx].mean().item())
+        sin_mat = sin_mat * St[idx] * 10
+
+        # sin_mat = sin_mat * St
+        loss2 = 2 * sin_mat.sum()
+        # loss = (loss1 * self.beta + loss2) / len(S_emb)
+        loss = loss2 / len(S_emb)
+        # mlflow.log_metric("loss2", loss2.item())
+
+        # P = self.projector.experts[0].mlp[0].weight.T[:, :10]
+        # lam = torch.linalg.svdvals(P)
+        # loss3 = -lam.pow(2).sum()
+        # loss = (loss1 * self.beta + loss2 + loss3) / len(S_emb)
+        # mlflow.log_metric("rk_loss", loss3.item())
+        return loss
+
+
+class conD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "cond"
+        self.beta = args.cond_beta
+        self.adaptor = Projector(self.teacher._penultimate_dim, self.student._penultimate_dim, 1, norm=False, dropout_rate=0., shallow=False)
+        self.projector = Projector(self.student._penultimate_dim, self.student._penultimate_dim, 1, norm=False, dropout_rate=0., shallow=True)
+
+    def get_loss(self, data, label):
+        S_emb = self.student.forward_penultimate(data)
+        T_emb = self.teacher.forward_penultimate(data)
+        T_adapt_emb = self.adaptor(T_emb)
+        predictor = deepcopy(self.student.linear)
+        for param in predictor.parameters():
+            param.requires_grad = False
+        T_logits = predictor(T_adapt_emb)
+        loss_T = F.binary_cross_entropy_with_logits(T_logits.squeeze(-1), label.squeeze(-1).float())
+        T_adapt_proj = T_adapt_emb
+        loss_S = (T_adapt_proj.detach() - S_emb).pow(2).sum(-1).mean()
+        loss = loss_T * self.beta + loss_S
+        mlflow.log_metrics({"loss_T":loss_T.item(), "loss_S":loss_S.item()})
+        return loss
+
+
+class PDD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "pdd"
+        self.K = args.pdd_K
+        self.beta = args.pdd_beta
+        self.gamma = args.pdd_gamma
+        self.adaptor = Projector(self.teacher._penultimate_dim, self.student._penultimate_dim, 1, norm=False, dropout_rate=0.1, shallow=False)
+    
+    def get_loss(self, data, label):
+        S_emb = self.student.forward_penultimate(data)
+        T_emb = self.teacher.forward_penultimate(data)
+        T_emb_adapt = self.adaptor(T_emb)
+        predictor = deepcopy(self.student.linear)
+        for param in predictor.parameters():
+            param.requires_grad = False
+        T_logits = predictor(T_emb_adapt)
+        loss_T = F.binary_cross_entropy_with_logits(T_logits.squeeze(-1), label.squeeze(-1).float())
+
+        Us, Ss, Vs = torch.svd_lowrank(S_emb, self.K)
+        Ut, St, Vt = torch.svd_lowrank(T_emb_adapt.detach(), self.K)
+        loss1 = Ss.sum()
+        cos = torch.diag(Ut.T.mm(Us))
+        sin = torch.sqrt(1. - torch.pow(torch.minimum(cos, torch.tensor(1.)), 2))
+        loss2 = sin.sum()
+        # loss2 = -cos.sum()
+        loss = loss_T * self.gamma + loss1 + self.beta * loss2
+        return loss
+
+
+class shrD(BaseKD4CTR):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "shrd"
+        self.K = args.shrd_K
+        self.beta = args.shrd_beta
+        self.layer = args.shrd_layer
+        
+    def get_loss(self, data, label):
+        if self.layer == "penu":
+            S_emb = self.student.forward_penultimate(data)
+            T_emb = self.teacher.forward_penultimate(data)
+        elif self.layer == "embed":
+            S_emb = self.student.forward_embed(data)
+            S_emb = S_emb.reshape(S_emb.shape[0], -1)
+            T_emb = self.teacher.forward_embed(data)
+            T_emb = T_emb.reshape(T_emb.shape[0], -1)
+        else: raise ValueError
+        S_emb = S_emb - S_emb.mean(0, keepdims=True)
+        T_emb = T_emb - T_emb.mean(0, keepdims=True)
+        Us, Ss, Vs = torch.svd_lowrank(S_emb, self.K)
+        Ut, St, Vt = torch.svd_lowrank(T_emb, self.K)
+        # Pt = torch.softmax(St / self.T, dim=0)
+        # loss1 = F.cross_entropy(Ss, Pt)
+        loss1 = Ss.sum()
+        cos = torch.diag(Ut.T.mm(Us))
+        sin = torch.sqrt(1. - torch.pow(torch.minimum(cos, torch.tensor(1.)), 2))
+        loss2 = sin.sum()
+        mlflow.log_metrics({f"loss2_{i}": sin[i] for i in range(self.K)})
+        # loss2 = -cos.sum()
+        loss = loss2 + self.beta * loss1
+        mlflow.log_metrics({"loss1":loss1.item(), "loss2":loss2.item()})
+        return loss
+    
+    # def forward(self, data, label):
+    #     output = self.student(data)
+    #     base_loss = self.student.get_loss(output, label)
+    #     kd_loss = self.get_loss(data, label)
+    #     loss = self.lmbda * kd_loss
+    #     return loss, base_loss.detach(), kd_loss.detach()
