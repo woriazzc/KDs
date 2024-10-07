@@ -1,5 +1,6 @@
 import os
 import pickle
+import random
 import mlflow
 import numpy as np
 import scipy.linalg
@@ -76,11 +77,13 @@ class fullExpert(nn.Module):
         super().__init__()
         mlps = []
         for i in range(len(dims) - 2):
-            mlps.append(nn.Dropout(dropout_rate))
+            if dropout_rate > 0:
+                mlps.append(nn.Dropout(dropout_rate))
             mlps.append(nn.Linear(dims[i], dims[i + 1]))
             # mlps.append(nn.BatchNorm1d(dims[i + 1]))
             mlps.append(nn.ReLU())
-        mlps.append(nn.Dropout(dropout_rate))
+        if dropout_rate > 0:
+            mlps.append(nn.Dropout(dropout_rate))
         mlps.append(nn.Linear(dims[-2], dims[-1]))
         self.mlp = nn.Sequential(*mlps)
 
@@ -141,19 +144,26 @@ def info_abundance(X):
     lam = torch.linalg.svdvals(X)
     lam = torch.abs(lam)
     lam = lam / lam.max()
-    return lam.sum(-1).mean().item()
+    return lam.sum().item()
 
 
-def cal_rsd(X, Y):
-        Us, Ss, Vs = torch.svd(X.T)
-        Ut, St, Vt = torch.svd(Y.T)
-        Ps, cospa, Pt = torch.svd(torch.mm(Us.T, Ut))
-        cospa = torch.round(torch.minimum(cospa, torch.tensor(1.)), decimals=4)
-        sinpa = torch.sqrt(1. - torch.pow(cospa, 2))
-        rsd = torch.norm(sinpa, 1)
-        # bmp = torch.norm(Ps.abs() - Pt.abs(), 2)
-        dis = rsd
-        return dis
+def cal_rsd(X, Y, ratio=0.9):
+    Us, Ss, Vs = torch.svd(X.T)
+    Ut, St, Vt = torch.svd(Y.T)
+    total_Ss, total_St = torch.sum(Ss), torch.sum(St)
+    cumu_Ss, cumu_St = torch.cumsum(Ss, dim=0), torch.cumsum(St, dim=0)
+    thresh_s, thresh_t = ratio * total_Ss, ratio * total_St
+    K_s, K_t = torch.where(cumu_Ss >= thresh_s)[0][0] + 1, torch.where(cumu_St >= thresh_t)[0][0] + 1
+    Us, Ut = Us[:, :K_s], Ut[:, :K_t]
+    # mlflow.log_metrics({"Ss":Ss[:K_s].sum().item() / Ss.sum().item(), "St":St[:K_t].sum().item() / St.sum().item()})
+    # mlflow.log_metrics({"Ks":K_s.item(), "Kt":K_t.item()})
+    Ps, cospa, Pt = torch.svd(torch.mm(Us.T, Ut))
+    cospa = torch.round(torch.minimum(cospa, torch.tensor(1.)), decimals=4)
+    sinpa = torch.sqrt(1. - torch.pow(cospa, 2))
+    rsd = torch.norm(sinpa, 1)
+    # bmp = torch.norm(Ps.abs() - Pt.abs(), 2)
+    dis = rsd
+    return dis
 
 
 def log_rsd(func):
@@ -163,9 +173,8 @@ def log_rsd(func):
             with torch.no_grad():
                 S_emb = self.student.forward_penultimate(data)
                 T_emb = self.teacher.forward_penultimate(data)
-                rsd = cal_rsd(S_emb, T_emb)
+                rsd = cal_rsd(S_emb, T_emb, 0.5)
                 mlflow.log_metric("rsd", rsd.item())
-                mlflow.log_metric("loss", loss.item())
         return loss
     return wrapper
 
