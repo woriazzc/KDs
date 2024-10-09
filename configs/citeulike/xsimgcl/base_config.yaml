@@ -1,0 +1,14 @@
+teacher:
+  embedding_dim: 800
+  num_layers: 2
+  layer_cl: 1
+  eps: 0.7
+  w_cl: 0.2
+  tau: 2
+student:
+  embedding_dim: 20
+  num_layers: 3
+  layer_cl: 1
+  eps: 0.7
+  w_cl: 0.05
+  tau: 2

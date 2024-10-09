@@ -1,18 +1,10 @@
-import os
 import math
-import pickle
-import random
-import yaml
-import numpy as np
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import scipy.sparse as sp
-from scipy.sparse import csr_matrix
 
 from .base_model import BaseRec, BaseGCN, BaseCTR
-from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls
 from .base_layer import BehaviorAggregator, MLP, LR, CrossNetComp, CINComp, AutoInt_AttentionLayer, EulerInteractionLayer, GateCrossLayer
 
 
@@ -132,65 +124,6 @@ class LightGCN(BaseGCN):
         nn.init.normal_(self.user_emb.weight, std=self.init_std)
         nn.init.normal_(self.item_emb.weight, std=self.init_std)
 
-    def _construct_small_graph(self):
-        user_dim = torch.LongTensor(self.dataset.train_pairs[:, 0].cpu())
-        item_dim = torch.LongTensor(self.dataset.train_pairs[:, 1].cpu())
-
-        first_sub = torch.stack([user_dim, item_dim + self.num_users])
-        second_sub = torch.stack([item_dim + self.num_users, user_dim])
-        index = torch.cat([first_sub, second_sub], dim=1)
-        data = torch.ones(index.size(-1)).int()
-        Graph = torch.sparse_coo_tensor(index, data,
-                                            torch.Size([self.num_users + self.num_items, self.num_users + self.num_items]), dtype=torch.int)
-        dense = Graph.to_dense()
-        D = torch.sum(dense, dim=1).float()
-        D[D == 0.] = 1.
-        D_sqrt = torch.sqrt(D).unsqueeze(dim=0)
-        dense = dense / D_sqrt
-        dense = dense / D_sqrt.t()
-        index = dense.nonzero(as_tuple=False)
-        data = dense[dense >= 1e-9]
-        assert len(index) == len(data)
-        Graph = torch.sparse_coo_tensor(index.t(), data, torch.Size(
-            [self.num_users + self.num_items, self.num_users + self.num_items]), dtype=torch.float)
-        Graph = Graph.coalesce()
-        return Graph
-    
-    def _construct_large_graph(self):
-        adj_mat = sp.dok_matrix((self.num_users + self.num_items, self.num_users + self.num_items), dtype=np.float32)
-        adj_mat = adj_mat.tolil()
-        train_pairs = self.dataset.train_pairs.numpy()
-        UserItemNet  = csr_matrix((np.ones(len(train_pairs)), (train_pairs[:, 0], train_pairs[:, 1])), shape=(self.num_users, self.num_items))
-        R = UserItemNet.tolil()
-        adj_mat[:self.num_users, self.num_users:] = R
-        adj_mat[self.num_users:, :self.num_users] = R.T
-        adj_mat = adj_mat.todok()
-        rowsum = np.array(adj_mat.sum(axis=1))
-        d_inv = np.power(rowsum, -0.5).flatten()
-        d_inv[np.isinf(d_inv)] = 0.
-        d_mat = sp.diags(d_inv)
-        
-        norm_adj = d_mat.dot(adj_mat)
-        norm_adj = norm_adj.dot(d_mat)
-        norm_adj = norm_adj.tocsr()
-        Graph = convert_sp_mat_to_sp_tensor(norm_adj)
-        Graph = Graph.coalesce()
-        return Graph
-
-    def construct_graph(self):
-        f_Graph = os.path.join("modeling", "backbone", "crafts", self.args.dataset, f"Graph.pkl")
-        sucflg, Graph = load_pkls(f_Graph)
-        if sucflg:
-            return Graph.cuda()
-        
-        config = yaml.load(open(os.path.join(self.args.DATA_DIR, self.args.dataset, 'config.yaml'), 'r'), Loader=yaml.FullLoader)
-        if "large" in config and config["large"] == True:
-            Graph = self._construct_large_graph()
-        else:
-            Graph = self._construct_small_graph()
-        dump_pkls((Graph, f_Graph))
-        return Graph.cuda()
-
     def _dropout_x(self, x, keep_prob):
         size = x.size()
         index = x.indices().t()
@@ -238,12 +171,6 @@ class LightGCN(BaseGCN):
                 all_emb = torch.sparse.mm(g_droped, all_emb)
             light_out = (light_out * layer + all_emb) / (layer + 1)
         users, items = torch.split(light_out, [self.num_users, self.num_items])
-        return users, items
-    
-    def get_all_pre_embedding(self):
-        users = self.user_emb(self.user_list)
-        items = self.item_emb(self.item_list)
-        
         return users, items
 
 
@@ -393,6 +320,92 @@ class SimpleX(BaseRec):
         if self.enable_bias:
             score_mat += self.user_bias(batch_user.cuda()) + self.global_bias
         return score_mat
+
+
+# Refer to https://github.com/Coder-Yu/SELFRec/blob/main/model/graph/XSimGCL.py
+class XSimGCL(BaseGCN):
+    def __init__(self, dataset, args):
+        super().__init__(dataset, args)
+        self.model_name = "xsimgcl"
+        self.embedding_dim = args.embedding_dim
+        self.num_layers = args.num_layers
+        self.layer_cl = args.layer_cl
+        self.eps = args.eps
+        self.w_cl = args.w_cl
+        self.tau = args.tau
+
+        self.user_emb = torch.nn.Embedding(num_embeddings=self.num_users, embedding_dim=self.embedding_dim)
+        self.item_emb = torch.nn.Embedding(num_embeddings=self.num_items, embedding_dim=self.embedding_dim)
+        
+        self.Graph = self.construct_graph()
+
+        self.reset_para()
+    
+    def reset_para(self):
+        nn.init.xavier_uniform_(self.user_emb.weight)
+        nn.init.xavier_uniform_(self.item_emb.weight)
+
+    def computer(self, perturbed=False):
+        users_emb = self.user_emb.weight
+        items_emb = self.item_emb.weight
+        all_emb = torch.cat([users_emb, items_emb])
+        gcn_out = torch.zeros_like(all_emb)
+        perturbed_out = None
+
+        for layer in range(self.num_layers):
+            all_emb = torch.sparse.mm(self.Graph, all_emb)
+            if perturbed:
+                random_noise = torch.rand_like(all_emb).cuda()
+                all_emb += torch.sign(all_emb) * F.normalize(random_noise, dim=-1) * self.eps
+            gcn_out = (gcn_out * layer + all_emb) / (layer + 1)
+            if layer == self.layer_cl - 1:
+                perturbed_out = all_emb
+        users, items = torch.split(gcn_out, [self.num_users, self.num_items])
+        if perturbed:
+            perturbed_users, perturbed_items = torch.split(perturbed_out, [self.num_users, self.num_items])
+            return users, items, perturbed_users, perturbed_items
+        else:
+            return users, items
+
+    def forward(self, batch_user, batch_pos_item, batch_neg_item):
+        all_users, all_items, perturbed_users, perturbed_items = self.computer(True)
+
+        u = all_users[batch_user]
+        i = all_items[batch_pos_item]
+        j = all_items[batch_neg_item]
+
+        uid, iid = batch_user.unique(), batch_pos_item.unique()
+        ori_u, ori_i = all_users[uid], all_items[iid]
+        pert_u, pert_i = perturbed_users[uid], perturbed_items[iid]     # batch_size, embed_dim
+        
+        pos_score = (u * i).sum(dim=1, keepdim=True)    # batch_size, 1
+        neg_score = torch.bmm(j, u.unsqueeze(-1)).squeeze(-1)       # batch_size, num_ns
+
+        return pos_score, neg_score, ori_u, ori_i, pert_u, pert_i
+    
+    def InfoNCE(self, view1, view2, temperature: float, b_cos: bool = True):
+        """
+        Args:
+            view1: (torch.Tensor - N x D)
+            view2: (torch.Tensor - N x D)
+            temperature: float
+            b_cos (bool)
+        Return: Average InfoNCE Loss
+        """
+        if b_cos:
+            view1, view2 = F.normalize(view1, dim=1), F.normalize(view2, dim=1)
+
+        pos_score = (view1 @ view2.T) / temperature
+        score = torch.diag(F.log_softmax(pos_score, dim=1))
+        return -score.mean()
+
+    def get_loss(self, output):
+        pos_score, neg_score, ori_u, ori_i, pert_u, pert_i = output
+        pos_score = pos_score.expand_as(neg_score)  # batch_size, num_ns
+        bpr_loss = -F.logsigmoid(pos_score - neg_score).mean(1).sum()
+        cl_loss = self.InfoNCE(ori_u, pert_u, self.tau) + self.InfoNCE(ori_i, pert_i, self.tau)
+        loss = bpr_loss + self.w_cl * cl_loss
+        return loss
 
 
 

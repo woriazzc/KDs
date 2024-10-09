@@ -1,8 +1,15 @@
+import os
+import yaml
+import numpy as np
+import scipy.sparse as sp
+from scipy.sparse import csr_matrix
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from .base_layer import Embedding
+from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls
 
 
 class BaseRec(nn.Module):
@@ -65,6 +72,65 @@ class BaseRec(nn.Module):
 class BaseGCN(BaseRec):
     def __init__(self, dataset, args):
         super().__init__(dataset, args)
+
+    def _construct_small_graph(self):
+        user_dim = torch.LongTensor(self.dataset.train_pairs[:, 0].cpu())
+        item_dim = torch.LongTensor(self.dataset.train_pairs[:, 1].cpu())
+
+        first_sub = torch.stack([user_dim, item_dim + self.num_users])
+        second_sub = torch.stack([item_dim + self.num_users, user_dim])
+        index = torch.cat([first_sub, second_sub], dim=1)
+        data = torch.ones(index.size(-1)).int()
+        Graph = torch.sparse_coo_tensor(index, data,
+                                            torch.Size([self.num_users + self.num_items, self.num_users + self.num_items]), dtype=torch.int)
+        dense = Graph.to_dense()
+        D = torch.sum(dense, dim=1).float()
+        D[D == 0.] = 1.
+        D_sqrt = torch.sqrt(D).unsqueeze(dim=0)
+        dense = dense / D_sqrt
+        dense = dense / D_sqrt.t()
+        index = dense.nonzero(as_tuple=False)
+        data = dense[dense >= 1e-9]
+        assert len(index) == len(data)
+        Graph = torch.sparse_coo_tensor(index.t(), data, torch.Size(
+            [self.num_users + self.num_items, self.num_users + self.num_items]), dtype=torch.float)
+        Graph = Graph.coalesce()
+        return Graph
+    
+    def _construct_large_graph(self):
+        adj_mat = sp.dok_matrix((self.num_users + self.num_items, self.num_users + self.num_items), dtype=np.float32)
+        adj_mat = adj_mat.tolil()
+        train_pairs = self.dataset.train_pairs.numpy()
+        UserItemNet  = csr_matrix((np.ones(len(train_pairs)), (train_pairs[:, 0], train_pairs[:, 1])), shape=(self.num_users, self.num_items))
+        R = UserItemNet.tolil()
+        adj_mat[:self.num_users, self.num_users:] = R
+        adj_mat[self.num_users:, :self.num_users] = R.T
+        adj_mat = adj_mat.todok()
+        rowsum = np.array(adj_mat.sum(axis=1))
+        d_inv = np.power(rowsum, -0.5).flatten()
+        d_inv[np.isinf(d_inv)] = 0.
+        d_mat = sp.diags(d_inv)
+        
+        norm_adj = d_mat.dot(adj_mat)
+        norm_adj = norm_adj.dot(d_mat)
+        norm_adj = norm_adj.tocsr()
+        Graph = convert_sp_mat_to_sp_tensor(norm_adj)
+        Graph = Graph.coalesce()
+        return Graph
+
+    def construct_graph(self):
+        f_Graph = os.path.join("modeling", "backbone", "crafts", self.args.dataset, f"Graph.pkl")
+        sucflg, Graph = load_pkls(f_Graph)
+        if sucflg:
+            return Graph.cuda()
+        
+        config = yaml.load(open(os.path.join(self.args.DATA_DIR, self.args.dataset, 'config.yaml'), 'r'), Loader=yaml.FullLoader)
+        if "large" in config and config["large"] == True:
+            Graph = self._construct_large_graph()
+        else:
+            Graph = self._construct_small_graph()
+        dump_pkls((Graph, f_Graph))
+        return Graph.cuda()
     
     def computer(self):
         """
@@ -80,7 +146,10 @@ class BaseGCN(BaseRec):
         users : 2-D FloatTensor (num. users x dim)
         items : 2-D FloatTensor (num. items x dim)
         """
-        raise NotImplementedError
+        users = self.user_emb(self.user_list)
+        items = self.item_emb(self.item_list)
+        
+        return users, items
     
     def forward(self, batch_user, batch_pos_item, batch_neg_item):
         """
