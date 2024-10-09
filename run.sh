@@ -8,6 +8,7 @@ python -u main.py --dataset=foursquare --backbone=lightgcn --train_teacher --tea
 python -u main.py --dataset=citeulike --backbone=bpr --train_teacher --teacher embedding_dim=400 --cfg wd=1e-3 --suffix teacher
 python -u main.py --dataset=citeulike --backbone=lightgcn --train_teacher --teacher embedding_dim=2000 num_layers=3 --cfg wd=1e-7 --suffix teacher
 python -u main.py --dataset=citeulike --backbone=simplex --train_teacher --teacher embedding_dim=500 --cfg wd=1e-5 num_ns=2000 --suffix teacher
+python -u main.py --dataset=citeulike --backbone=xsimgcl --train_teacher --suffix teacher
 
 python -u main.py --dataset=gowalla --backbone=bpr --train_teacher --teacher embedding_dim=300 --cfg wd=1e-4 --suffix teacher
 python -u main.py --dataset=gowalla --backbone=lightgcn --train_teacher --teacher embedding_dim=2000 num_layers=4 --cfg wd=1e-6 --suffix teacher
@@ -24,6 +25,7 @@ python -u main.py --dataset=foursquare --backbone=lightgcn --model=scratch --stu
 python -u main.py --dataset=citeulike --backbone=bpr --model=scratch --student embedding_dim=20 --cfg wd=1e-3 --suffix student
 python -u main.py --dataset=citeulike --backbone=lightgcn --model=scratch --student embedding_dim=20 num_layers=3 --cfg wd=1e-3 --suffix student
 python -u main.py --dataset=citeulike --backbone=simplex --model=scratch --student embedding_dim=20 --suffix student
+python -u main.py --dataset=citeulike --backbone=xsimgcl --model=scratch --suffix student
 
 python -u main.py --dataset=gowalla --backbone=bpr --model=scratch --student embedding_dim=20 --cfg wd=1e-3 --suffix student
 python -u main.py --dataset=gowalla --backbone=lightgcn --model=scratch --student embedding_dim=20 num_layers=4 --cfg wd=1e-7 --suffix student
@@ -45,6 +47,8 @@ python -u main.py --dataset=citeulike --backbone=bpr --model=graphd
 python -u main.py --dataset=citeulike --backbone=bpr --model=filterd
 python -u main.py --dataset=citeulike --backbone=bpr --model=fd
 python -u main.py --dataset=citeulike --backbone=bpr --model=gdcp
+python -u main.py --dataset=citeulike --backbone=bpr --model=preld
+python -u main.py --dataset=citeulike --backbone=bpr --model=vkd
 
 python -u main.py --dataset=citeulike --backbone=lightgcn --model=graphd --cfg ablation=True --suffix ablation
 python -u main.py --dataset=citeulike --backbone=lightgcn --model=graphd

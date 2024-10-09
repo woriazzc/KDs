@@ -466,14 +466,14 @@ class HTD(BaseKD4Rec):
     def get_GA_loss(self, batch_entity, is_user=True):
 
         if is_user:
-            s = self.student.get_user_embedding(batch_entity)													
-            t = self.teacher.get_user_embedding(batch_entity)										
+            s = self.student.get_user_embedding(batch_entity)
+            t = self.teacher.get_user_embedding(batch_entity)
 
             f = self.user_f
             v = self.user_v
         else:
-            s = self.student.get_item_embedding(batch_entity)													
-            t = self.teacher.get_item_embedding(batch_entity)											
+            s = self.student.get_item_embedding(batch_entity)
+            t = self.teacher.get_item_embedding(batch_entity)
     
             f = self.item_f
             v = self.item_v
@@ -948,6 +948,90 @@ class HetComp(BaseKD4Rec):
         kd_loss = self.get_loss(batch_user)
         loss = self.lmbda * kd_loss
         return loss
+
+
+class Fit(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "fit"
+        self.norm = args.fit_norm
+        self.student_dim = self.student.embedding_dim
+        self.teacher_dim = self.teacher.embedding_dim
+        self.projector_u = nn.Linear(self.student_dim, self.teacher_dim)
+        self.projector_i = nn.Linear(self.student_dim, self.teacher_dim)
+
+    def get_features(self, batch_entity, is_user):
+        if is_user:
+            s = self.student.get_user_embedding(batch_entity)
+            t = self.teacher.get_user_embedding(batch_entity)
+            s_proj = self.projector_u(s)
+            if self.norm:
+                s_proj = F.normalize(s_proj, p=2, dim=-1)
+                t = F.normalize(t, p=2, dim=-1)
+        else:
+            s = self.student.get_item_embedding(batch_entity)
+            t = self.teacher.get_item_embedding(batch_entity)
+            s_proj = self.projector_i(s)
+            if self.norm:
+                s_proj = F.normalize(s_proj, p=2, dim=-1)
+                t = F.normalize(t, p=2, dim=-1)
+        return t, s_proj
+    
+    def get_DE_loss(self, batch_entity, is_user):
+        T_feas, S_feas = self.get_features(batch_entity, is_user)
+        G_diff = (T_feas - S_feas).pow(2).sum(-1)
+        DE_loss = G_diff.sum()
+        return DE_loss
+
+    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+        DE_loss_user = self.get_DE_loss(batch_user.unique(), True)
+        DE_loss_pos = self.get_DE_loss(batch_pos_item.unique(), False)
+        DE_loss_neg = self.get_DE_loss(batch_neg_item.unique(), False)
+
+        DE_loss = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
+        return DE_loss
+
+
+class VkD(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "vkd"
+        self.norm = args.vkd_norm
+        self.student_dim = self.student.embedding_dim
+        self.teacher_dim = self.teacher.embedding_dim
+        self.projector_u = torch.nn.utils.parametrizations.orthogonal(nn.Linear(self.student_dim, self.teacher_dim, bias=False))
+        self.projector_i = torch.nn.utils.parametrizations.orthogonal(nn.Linear(self.student_dim, self.teacher_dim, bias=False))
+
+    def get_features(self, batch_entity, is_user):
+        if is_user:
+            s = self.student.get_user_embedding(batch_entity)
+            t = self.teacher.get_user_embedding(batch_entity)
+            if self.norm:
+                s = F.normalize(s, p=2, dim=-1)
+                t = F.normalize(t, p=2, dim=-1)
+            s_proj = self.projector_u(s)
+        else:
+            s = self.student.get_item_embedding(batch_entity)
+            t = self.teacher.get_item_embedding(batch_entity)
+            if self.norm:
+                s = F.normalize(s, p=2, dim=-1)
+                t = F.normalize(t, p=2, dim=-1)
+            s_proj = self.projector_i(s)
+        return t, s_proj
+
+    def get_DE_loss(self, batch_entity, is_user):
+        T_feas, S_feas = self.get_features(batch_entity, is_user)
+        G_diff = (T_feas - S_feas).pow(2).sum(-1)
+        DE_loss = G_diff.sum()
+        return DE_loss
+
+    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+        DE_loss_user = self.get_DE_loss(batch_user.unique(), True)
+        DE_loss_pos = self.get_DE_loss(batch_pos_item.unique(), False)
+        DE_loss_neg = self.get_DE_loss(batch_neg_item.unique(), False)
+
+        DE_loss = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
+        return DE_loss
 
 
 class NoKD(BaseKD4CTR):

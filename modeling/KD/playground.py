@@ -1103,6 +1103,53 @@ class FreqD(BaseKD4Rec):
         return DE_loss
 
 
+class PrelD(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "preld"
+        self.K = args.preld_K
+    
+    def get_features(self, batch_entity, is_user):
+        if is_user:
+            s = self.student.get_user_embedding(batch_entity)
+            t = self.teacher.get_user_embedding(batch_entity)
+        else:
+            s = self.student.get_item_embedding(batch_entity)
+            t = self.teacher.get_item_embedding(batch_entity)
+        return s, t
+
+    def pca_with_grad(self, X, K):
+        U, S, V = torch.svd_lowrank(X, K)
+        Y = U
+        # Y = U.mm(torch.diag(S))
+        Y = X.mm(X.T)
+        return Y
+    
+    def pca_mse(self, s, t):
+        s_red = self.pca_with_grad(s, self.K)
+        t_red = self.pca_with_grad(t, self.K)
+        loss = (s_red - t_red).pow(2).sum(-1).mean()
+        return loss
+    
+    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+        users = batch_user.unique()
+        items = torch.cat([batch_pos_item, batch_neg_item.flatten()], 0).unique()
+        su, tu = self.get_features(users, is_user=True)
+        si, ti = self.get_features(items, is_user=False)
+        loss_u = self.pca_mse(su, tu)
+        loss_i = self.pca_mse(si, ti)
+        loss = loss_u + loss_i
+        # mlflow.log_metrics({"loss_u":loss_u.item(), "loss_i":loss_i.item()})
+        return loss
+
+    # def forward(self, batch_user, batch_pos_item, batch_neg_item):
+    #     output = self.student(batch_user, batch_pos_item, batch_neg_item)
+    #     base_loss = self.student.get_loss(output)
+    #     kd_loss = self.get_loss(batch_user, batch_pos_item, batch_neg_item)
+    #     loss = kd_loss
+    #     return loss, base_loss.detach(), kd_loss.detach()
+
+
 class HetD(BaseKD4CTR):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
