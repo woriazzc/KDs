@@ -1,9 +1,10 @@
-epochs: 1000
-batch_size: 10000
-lr: 1.e-3
-lmbda: 0.1
+crossnet:
+  epochs: 1000
+  batch_size: 10000
+  lr: 1.e-3
+  lmbda: 0.1
 
-pcad_SK: 80
-pcad_TK: 500
-pcad_Sr: 0.3
-pcad_Tr: 0.3
+  pcad_SK: 80
+  pcad_TK: 500
+  pcad_Sr: 0.3
+  pcad_Tr: 0.3

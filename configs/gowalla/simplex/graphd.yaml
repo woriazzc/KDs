@@ -1,14 +1,15 @@
-epochs: 1000
-batch_size: 256
-lr: 1.e-4
-wd: 1.e-5
-num_ns: 2000
-neg_sampling_on_all: True
+simplex:
+  epochs: 1000
+  batch_size: 256
+  lr: 1.e-4
+  wd: 1.e-5
+  num_ns: 2000
+  neg_sampling_on_all: True
 
-ablation: False
+  ablation: False
 
-graphd_num_experts: 5
-graphd_K: 5
-graphd_alpha: 0.7
-graphd_keep_prob: 0.7
-graphd_dropout_rate: 0.2
+  graphd_num_experts: 5
+  graphd_K: 5
+  graphd_alpha: 0.7
+  graphd_keep_prob: 0.7
+  graphd_dropout_rate: 0.2

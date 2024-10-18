@@ -1,5 +1,6 @@
-rd_mu: 0.1
-rd_topk: 30
-rd_T: 1
-rd_dynamic_sample: 100
-rrd_start_epoch: 100
+bpr:
+  rd_mu: 0.1
+  rd_topk: 30
+  rd_T: 1
+  rd_dynamic_sample: 100
+  rrd_start_epoch: 100

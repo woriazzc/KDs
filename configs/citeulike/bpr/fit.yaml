@@ -1,8 +1,9 @@
-epochs: 1000
-batch_size: 2048
-lr: 1.e-3
-wd: 1.e-7
-lmbda: 0.05
+bpr:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-7
+  lmbda: 0.05
 
-fit_norm: True
-fit_bias: True
+  fit_norm: True
+  fit_bias: True

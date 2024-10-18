@@ -26,15 +26,15 @@ def main(args):
 
     # Backbone
     all_backbones = [e.lower() for e in dir(backbone)]
-    if args.backbone.lower() in all_backbones:
+    if args.S_backbone.lower() in all_backbones:
         all_teacher_args, all_student_args = deepcopy(args), deepcopy(args)
         all_teacher_args.__dict__.update(teacher_args.__dict__)
         all_student_args.__dict__.update(student_args.__dict__)
-        Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(trainset, all_teacher_args).cuda()
-        Student = getattr(backbone, dir(backbone)[all_backbones.index(args.backbone.lower())])(trainset, all_student_args).cuda()
+        Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.T_backbone.lower())])(trainset, all_teacher_args).cuda()
+        Student = getattr(backbone, dir(backbone)[all_backbones.index(args.S_backbone.lower())])(trainset, all_student_args).cuda()
     else:
-        logger.log(f'Invalid backbone {args.backbone}.')
-        raise(NotImplementedError, f'Invalid backbone {args.backbone}.')
+        logger.log(f'Invalid backbone {args.S_backbone}.')
+        raise(NotImplementedError, f'Invalid backbone {args.S_backbone}.')
 
     if args.model.lower() == "scratch":
         if args.train_teacher:
@@ -42,7 +42,7 @@ def main(args):
         else:
             model = KD.Scratch(args, Student).cuda()
     else:
-        T_path = os.path.join("checkpoints", args.dataset, args.backbone, f"scratch-{teacher_args.embedding_dim}", "BEST_EPOCH.pt")
+        T_path = os.path.join("checkpoints", args.dataset, args.T_backbone, f"scratch-{teacher_args.embedding_dim}", "BEST_EPOCH.pt")
         Teacher.load_state_dict(torch.load(T_path))
         all_models = [e.lower() for e in dir(KD)]
         if args.model.lower() in all_models:
@@ -122,7 +122,7 @@ def main(args):
     Evaluator.print_final_result(logger, eval_dict)
     if not args.no_save:
         embedding_dim = Teacher.embedding_dim if args.train_teacher else Student.embedding_dim
-        save_dir = os.path.join("checkpoints", args.dataset, args.backbone, f"{args.model.lower()}-{embedding_dim}")
+        save_dir = os.path.join("checkpoints", args.dataset, args.S_backbone, f"{args.model.lower()}-{embedding_dim}")
         os.makedirs(save_dir, exist_ok=True)
         torch.save(best_model, os.path.join(save_dir, "BEST_EPOCH.pt"))
         for idx, ckpt in enumerate(ckpts):

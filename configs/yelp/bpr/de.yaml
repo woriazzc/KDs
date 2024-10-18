@@ -1,9 +1,10 @@
-epochs: 1000
-batch_size: 2048
-lr: 1.e-3
-wd: 1.e-3
-lmbda: 0.005
+bpr:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-3
+  lmbda: 0.005
 
-de_end_T: 1.e-10
-de_anneal_size: 1.e+10
-de_num_experts: 5
+  de_end_T: 1.e-10
+  de_anneal_size: 1.e+10
+  de_num_experts: 5
