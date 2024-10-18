@@ -1,3 +1,4 @@
-unkd_group_num: 4
-unkd_lamda: 0.
-unkd_n_distill: 30
+bpr:
+  unkd_group_num: 4
+  unkd_lamda: 0.
+  unkd_n_distill: 30

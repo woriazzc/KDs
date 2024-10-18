@@ -1,10 +1,11 @@
-epochs: 1000
-batch_size: 4096
-lr: 1.e-3
-wd: 1.e-3
-lmbda: 0.005
+bpr:
+  epochs: 1000
+  batch_size: 4096
+  lr: 1.e-3
+  wd: 1.e-3
+  lmbda: 0.005
 
-rrd_K: 100
-rrd_L: 200
-rrd_T: 100
-rrd_mxK: 500
+  rrd_K: 100
+  rrd_L: 200
+  rrd_T: 100
+  rrd_mxK: 500

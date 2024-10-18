@@ -1,6 +1,7 @@
 teacher:
-  init_std: 1.e-2
-  embedding_dim: 400
+  bpr:
+    init_std: 1.e-2
+    embedding_dim: 400
 student:
   init_std: 1.e-2
   embedding_dim: 20

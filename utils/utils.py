@@ -70,7 +70,7 @@ class AverageMeter:
 
 class Logger:
     def __init__(self, args, no_log):
-        self.log_path = os.path.join(args.LOG_DIR, args.dataset, args.backbone, args.model + ('_' if args.suffix != '' else '') + args.suffix + '.log')
+        self.log_path = os.path.join(args.LOG_DIR, args.dataset, args.S_backbone, args.model + ('_' if args.suffix != '' else '') + args.suffix + '.log')
         os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
         self.no_log = no_log
 

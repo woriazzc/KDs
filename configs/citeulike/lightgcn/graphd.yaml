@@ -1,13 +1,14 @@
-epochs: 1000
-batch_size: 2048
-lr: 1.e-3
-wd: 1.e-7
-lmbda: 0.1
+lightgcn:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-7
+  lmbda: 0.1
 
-ablation: False
+  ablation: False
 
-graphd_num_experts: 5
-graphd_K: 5
-graphd_alpha: 0.7
-graphd_keep_prob: 0.5
-graphd_dropout_rate: 0.2
+  graphd_num_experts: 5
+  graphd_K: 5
+  graphd_alpha: 0.7
+  graphd_keep_prob: 0.5
+  graphd_dropout_rate: 0.2

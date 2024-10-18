@@ -1,9 +1,10 @@
-epochs: 1000
-batch_size: 2048
-lr: 1.e-3
-wd: 1.e-8
-lmbda: 0.5
+bpr:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-8
+  lmbda: 0.5
 
-unkd_group_num: 2
-unkd_lamda: 0.
-unkd_n_distill: 2
+  unkd_group_num: 2
+  unkd_lamda: 0.
+  unkd_n_distill: 2
