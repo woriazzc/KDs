@@ -955,10 +955,11 @@ class Fit(BaseKD4Rec):
         super().__init__(args, teacher, student)
         self.model_name = "fit"
         self.norm = args.fit_norm
+        self.bias = args.fit_bias
         self.student_dim = self.student.embedding_dim
         self.teacher_dim = self.teacher.embedding_dim
-        self.projector_u = nn.Linear(self.student_dim, self.teacher_dim)
-        self.projector_i = nn.Linear(self.student_dim, self.teacher_dim)
+        self.projector_u = nn.Linear(self.student_dim, self.teacher_dim, bias=self.bias)
+        self.projector_i = nn.Linear(self.student_dim, self.teacher_dim, bias=self.bias)
 
     def get_features(self, batch_entity, is_user):
         if is_user:
@@ -984,11 +985,11 @@ class Fit(BaseKD4Rec):
         return DE_loss
 
     def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
-        DE_loss_user = self.get_DE_loss(batch_user.unique(), True)
-        DE_loss_pos = self.get_DE_loss(batch_pos_item.unique(), False)
-        DE_loss_neg = self.get_DE_loss(batch_neg_item.unique(), False)
-
-        DE_loss = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
+        u = torch.LongTensor(np.random.choice(np.array([i for i in range(self.num_users)]), len(batch_user), replace=False)).cuda()
+        i = torch.LongTensor(np.random.choice(np.array([i for i in range(self.num_items)]), len(batch_user), replace=False)).cuda()
+        DE_loss_user = self.get_DE_loss(u, True)
+        DE_loss_item = self.get_DE_loss(i, False)
+        DE_loss = DE_loss_user + DE_loss_item
         return DE_loss
 
 
@@ -997,6 +998,7 @@ class VkD(BaseKD4Rec):
         super().__init__(args, teacher, student)
         self.model_name = "vkd"
         self.norm = args.vkd_norm
+        self.center = args.vkd_center
         self.student_dim = self.student.embedding_dim
         self.teacher_dim = self.teacher.embedding_dim
         self.projector_u = torch.nn.utils.parametrizations.orthogonal(nn.Linear(self.student_dim, self.teacher_dim, bias=False))
@@ -1006,17 +1008,21 @@ class VkD(BaseKD4Rec):
         if is_user:
             s = self.student.get_user_embedding(batch_entity)
             t = self.teacher.get_user_embedding(batch_entity)
-            if self.norm:
-                s = F.normalize(s, p=2, dim=-1)
-                t = F.normalize(t, p=2, dim=-1)
             s_proj = self.projector_u(s)
+            if self.center:
+                t -= t.mean(0)
+            if self.norm:
+                s_proj = F.normalize(s_proj, p=2, dim=-1)
+                t = F.normalize(t, p=2, dim=-1)
         else:
             s = self.student.get_item_embedding(batch_entity)
             t = self.teacher.get_item_embedding(batch_entity)
-            if self.norm:
-                s = F.normalize(s, p=2, dim=-1)
-                t = F.normalize(t, p=2, dim=-1)
             s_proj = self.projector_i(s)
+            if self.center:
+                t -= t.mean(0)
+            if self.norm:
+                s_proj = F.normalize(s_proj, p=2, dim=-1)
+                t = F.normalize(t, p=2, dim=-1)
         return t, s_proj
 
     def get_DE_loss(self, batch_entity, is_user):
@@ -1026,11 +1032,11 @@ class VkD(BaseKD4Rec):
         return DE_loss
 
     def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
-        DE_loss_user = self.get_DE_loss(batch_user.unique(), True)
-        DE_loss_pos = self.get_DE_loss(batch_pos_item.unique(), False)
-        DE_loss_neg = self.get_DE_loss(batch_neg_item.unique(), False)
-
-        DE_loss = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
+        u = torch.LongTensor(np.random.choice(np.array([i for i in range(self.num_users)]), len(batch_user), replace=False)).cuda()
+        i = torch.LongTensor(np.random.choice(np.array([i for i in range(self.num_items)]), len(batch_user), replace=False)).cuda()
+        DE_loss_user = self.get_DE_loss(u, True)
+        DE_loss_item = self.get_DE_loss(i, False)
+        DE_loss = DE_loss_user + DE_loss_item
         return DE_loss
 
 
