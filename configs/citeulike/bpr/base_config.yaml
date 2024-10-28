@@ -2,6 +2,23 @@ teacher:
   bpr:
     init_std: 1.e-2
     embedding_dim: 400
+  lightgcn:
+    init_std: 0.1
+    keep_prob: 0.6
+    A_split: False
+    dropout: False
+    embedding_dim: 2000
+    num_layers: 3
+  simplex:
+    init_std: 1.e-4
+    embedding_dim: 500
+    simplex_dropout_rate: 0.1
+    simplex_similarity_score: cosine
+    simplex_gamma: 0.6
+    simplex_margin: 0.1
+    simplex_max_len: 500
+    simplex_negative_weight: 100
+    simplex_enable_bias: False
 student:
   init_std: 1.e-2
   embedding_dim: 20
