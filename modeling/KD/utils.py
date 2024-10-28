@@ -91,16 +91,17 @@ class fullExpert(nn.Module):
         return self.mlp(x)
 
 class Projector(nn.Module):
-    def __init__(self, input_dim, output_dim, num_experts, norm=True, dropout_rate=0., shallow=False):
+    def __init__(self, input_dim, output_dim, num_experts, norm=False, dropout_rate=0., shallow=False, hidden_dim_ratio=0.5):
         super().__init__()
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.num_experts = num_experts
         self.norm = norm
+        self.hidden_dim_ratio = hidden_dim_ratio
         if shallow:
             expert_dims = [self.input_dim, self.output_dim]
         else:
-            expert_dims = [self.input_dim, (self.input_dim + self.output_dim) // 2, self.output_dim]
+            expert_dims = [self.input_dim, int(output_dim * self.hidden_dim_ratio), self.output_dim]
         self.experts = nn.ModuleList([fullExpert(expert_dims, dropout_rate) for i in range(self.num_experts)])
 
     def forward_experts(self, x, experts, reduction=True):
