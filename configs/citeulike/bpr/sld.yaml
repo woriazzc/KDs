@@ -1,0 +1,24 @@
+bpr:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-5
+  lmbda: 0.001
+  sld_tau: 0.1
+  sld_K: 100
+  sld_T: 10
+  sld_L: 200
+  sld_mxK: 500
+  sld_guide: teacher
+lightgcn:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-5
+  lmbda: 0.05
+  sld_tau: 0.1
+  sld_K: 100
+  sld_T: 10
+  sld_L: 200
+  sld_mxK: 500
+  sld_guide: teacher

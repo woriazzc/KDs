@@ -1,0 +1,36 @@
+bpr:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-3
+  lmbda: 0.01
+  ckd_tau: 1
+  ckd_K: 100
+  ckd_guide: student
+  ckd_init: 0.1
+  ckd_final: 0.9
+  ckd_grouth: 50
+lightgcn:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-3
+  lmbda: 0.01
+  ckd_tau: 1
+  ckd_K: 100
+  ckd_guide: student
+  ckd_init: 0.1
+  ckd_final: 0.9
+  ckd_grouth: 50
+simplex:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-3
+  lmbda: 0.01
+  ckd_tau: 1
+  ckd_K: 100
+  ckd_guide: student
+  ckd_init: 0.1
+  ckd_final: 0.5
+  ckd_grouth: 50
