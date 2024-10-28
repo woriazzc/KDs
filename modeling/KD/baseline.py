@@ -60,6 +60,35 @@ class Scratch(nn.Module):
         return self.backbone.state_dict()
 
 
+class KD(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "kd"
+        self.tau = args.kd_tau
+        self.K = args.kd_K
+        self.guide = args.kd_guide
+        if self.guide == "teacher":
+            self.topk_dict = self.get_topk_dict(self.teacher)
+
+    def get_topk_dict(self, model):
+        print('Generating Top-K dict...')
+        with torch.no_grad():
+            inter_mat = model.get_all_ratings()
+            _, topk_dict = torch.topk(inter_mat, self.K, dim=-1)
+        return topk_dict.type(torch.LongTensor).cuda()
+    
+    def do_something_in_each_epoch(self, epoch):
+        if self.guide == "student":
+            self.topk_dict = self.get_topk_dict(self.student)
+    
+    def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
+        logit_T = self.teacher.forward_multi_items(batch_users, self.topk_dict[batch_users])
+        logit_S = self.student.forward_multi_items(batch_users, self.topk_dict[batch_users])
+        prob_T = torch.softmax(logit_T / self.tau, dim=-1)
+        loss = F.cross_entropy(logit_S / self.tau, prob_T, reduction='sum')
+        return loss
+
+
 class RD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
@@ -956,10 +985,18 @@ class Fit(BaseKD4Rec):
         self.model_name = "fit"
         self.norm = args.fit_norm
         self.bias = args.fit_bias
+        self.linear = args.fit_linear
+        self.num_experts = args.num_experts
+        self.dropout_rate = args.dropout_rate
+        self.hidden_dim_ratio = args.hidden_dim_ratio
         self.student_dim = self.student.embedding_dim
         self.teacher_dim = self.teacher.embedding_dim
-        self.projector_u = nn.Linear(self.student_dim, self.teacher_dim, bias=self.bias)
-        self.projector_i = nn.Linear(self.student_dim, self.teacher_dim, bias=self.bias)
+        if self.linear:
+            self.projector_u = nn.Linear(self.student_dim, self.teacher_dim, bias=self.bias)
+            self.projector_i = nn.Linear(self.student_dim, self.teacher_dim, bias=self.bias)
+        else:
+            self.projector_u = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
+            self.projector_i = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
 
     def get_features(self, batch_entity, is_user):
         if is_user:

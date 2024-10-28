@@ -49,6 +49,7 @@ python -u main.py --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=
 python -u main.py --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=gdcp
 python -u main.py --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=preld
 python -u main.py --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=vkd
+python -u main.py --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=kd
 
 python -u main.py --dataset=citeulike --S_backbone=lightgcn --T_backbone=lightgcn --model=graphd --cfg ablation=True --suffix ablation
 python -u main.py --dataset=citeulike --S_backbone=lightgcn --T_backbone=lightgcn --model=graphd

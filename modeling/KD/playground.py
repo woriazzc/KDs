@@ -1150,6 +1150,332 @@ class PrelD(BaseKD4Rec):
     #     return loss, base_loss.detach(), kd_loss.detach()
 
 
+class SLD(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "sld"
+        self.tau = args.sld_tau
+        self.K = args.sld_K
+        self.T = args.sld_T
+        self.L = args.sld_L
+        self.mxK = args.sld_mxK
+        
+        # For interesting item
+        self.get_topk_dict()
+        ranking_list = torch.exp(-(torch.arange(self.mxK) + 1) / self.T)
+        self.ranking_mat = ranking_list.repeat(self.num_users, 1)
+
+        # For uninteresting item
+        self.mask = torch.ones((self.num_users, self.num_items))
+        train_pairs = self.dataset.train_pairs
+        self.mask[train_pairs[:, 0], train_pairs[:, 1]] = 0
+        for user in range(self.num_users):
+            self.mask[user, self.topk_dict[user]] = 0
+        self.mask.requires_grad = False
+
+    def get_topk_dict(self):
+        print('Generating Top-K dict...')
+        with torch.no_grad():
+            inter_mat = self.teacher.get_all_ratings()
+            train_pairs = self.dataset.train_pairs
+            # remove true interactions from topk_dict
+            inter_mat[train_pairs[:, 0], train_pairs[:, 1]] = -1e6
+            _, self.topk_dict = torch.topk(inter_mat, self.mxK, dim=-1)
+    
+    def get_samples(self, batch_user):
+
+        interesting_samples = torch.index_select(self.interesting_items, 0, batch_user)
+        uninteresting_samples = torch.index_select(self.uninteresting_items, 0, batch_user)
+
+        return interesting_samples, uninteresting_samples
+
+    # epoch 마다
+    def do_something_in_each_epoch(self, epoch):
+        with torch.no_grad():
+            # interesting items
+            self.interesting_items = torch.zeros((self.num_users, self.K))
+
+            # sampling
+            while True:
+                samples = torch.multinomial(self.ranking_mat, self.K, replacement=False)
+                if (samples > self.mxK).sum() == 0:
+                    break
+
+            samples = samples.sort(dim=1)[0]
+
+            for user in range(self.num_users):
+                self.interesting_items[user] = self.topk_dict[user][samples[user]]
+
+            self.interesting_items = self.interesting_items.cuda()
+
+            # uninteresting items
+            m1 = self.mask[: self.num_users // 2, :].cuda()
+            tmp1 = torch.multinomial(m1, self.L, replacement=False)
+            del m1
+
+            m2 = self.mask[self.num_users // 2 : ,:].cuda()
+            tmp2 = torch.multinomial(m2, self.L, replacement=False)
+            del m2
+
+            self.uninteresting_items = torch.cat([tmp1, tmp2], 0)
+    
+    def relaxed_ranking_loss(self, S1, S2):
+        
+        S1 = torch.minimum(S1, torch.tensor(80., device=S1.device))     # This may help
+        S2 = torch.minimum(S2, torch.tensor(80., device=S2.device))
+
+        above = S1.sum(1, keepdims=True)
+
+        below1 = S1.flip(-1).exp().cumsum(1)    # exp() of interesting_prediction results in inf
+        below2 = S2.exp().sum(1, keepdims=True)
+
+        below = (below1).log().sum(1, keepdims=True)
+        
+        return -(above - below).sum()
+    
+    def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
+        users = batch_users.unique()
+        interesting_items, uninteresting_items = self.get_samples(users)
+        interesting_items = interesting_items.type(torch.LongTensor).cuda()
+        uninteresting_items = uninteresting_items.type(torch.LongTensor).cuda()
+
+        interesting_prediction = self.student.forward_multi_items(users, interesting_items)
+        uninteresting_prediction = self.student.forward_multi_items(users, uninteresting_items)
+        loss = self.relaxed_ranking_loss(interesting_prediction, uninteresting_prediction)
+
+        # items = torch.cat([interesting_items, uninteresting_items], dim=-1)
+        # logit_T = self.teacher.forward_multi_items(users, items)
+        # logit_S = self.student.forward_multi_items(users, items)
+        # prob_T = torch.softmax(logit_T / self.tau, dim=-1)
+        # loss = F.cross_entropy(logit_S / self.tau, prob_T, reduction='sum')
+        return loss
+
+class MKD(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "mkd"
+        self.tau = args.mkd_tau
+        self.K = args.mkd_K
+        self.wT = args.mkd_wT
+        self.wa = args.mkd_wa
+        self.T_topk_dict = self.get_topk_dict(self.teacher)
+
+    def get_topk_dict(self, model):
+        print('Generating Top-K dict...')
+        with torch.no_grad():
+            inter_mat = model.get_all_ratings()
+            _, topk_dict = torch.topk(inter_mat, self.K, dim=-1)
+        return topk_dict.type(torch.LongTensor).cuda()
+    
+    def do_something_in_each_epoch(self, epoch):
+        self.S_topk_dict = self.get_topk_dict(self.student)
+
+    def ce_loss(self, logit_T, logit_S):
+        prob_T = torch.softmax(logit_T / self.tau, dim=-1)
+        loss = F.cross_entropy(logit_S / self.tau, prob_T, reduction='sum')
+        return loss
+    
+    def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
+        itemS = self.S_topk_dict[batch_users]
+        itemT = self.T_topk_dict[batch_users]
+        item_all = torch.cat([itemS, itemT], -1)
+        logit_T_itemS = self.teacher.forward_multi_items(batch_users, itemS)
+        logit_S_itemS = self.student.forward_multi_items(batch_users, itemS)
+        loss_itemS = self.ce_loss(logit_T_itemS, logit_S_itemS)
+        loss = (1. - self.wT - self.wa) * loss_itemS
+        if self.wT > 0:
+            logit_T_itemT = self.teacher.forward_multi_items(batch_users, itemT)
+            logit_S_itemT = self.student.forward_multi_items(batch_users, itemT)
+            loss_itemT = self.ce_loss(logit_T_itemT, logit_S_itemT)
+            loss += self.wT * loss_itemT
+        if self.wa > 0:
+            logit_T_all = self.teacher.forward_multi_items(batch_users, item_all)
+            logit_S_all = self.student.forward_multi_items(batch_users, item_all)
+            loss_all = self.ce_loss(logit_T_all, logit_S_all)
+            loss += self.wa * loss_all
+        return loss
+
+
+class TKD(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "tkd"
+        self.verbose = args.verbose
+        self.beta = args.tkd_beta
+        self.tau = args.tkd_tau
+        self.K = args.tkd_K
+        self.wa = args.tkd_wa
+        self.T_topk_dict = self.get_topk_dict(self.teacher)
+        self.num_experts = args.num_experts
+        self.dropout_rate = args.dropout_rate
+        self.sigma = args.tkd_sigma
+        self.warmup = args.tkd_warmup
+        self.user_list = torch.LongTensor([i for i in range(self.num_users)]).cuda()
+        self.item_list = torch.LongTensor([i for i in range(self.num_items)]).cuda()
+        self.student_dim = self.student.embedding_dim
+        self.teacher_dim = self.teacher.embedding_dim
+        self.projector_u = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=False, dropout_rate=self.dropout_rate)
+        self.projector_i = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=False, dropout_rate=self.dropout_rate)
+
+    def get_topk_dict(self, model):
+        print('Generating Top-K dict...')
+        with torch.no_grad():
+            inter_mat = model.get_all_ratings()
+            _, topk_dict = torch.topk(inter_mat, self.K, dim=-1)
+        return topk_dict.type(torch.LongTensor).cuda()  # Nu, K
+    
+    def do_something_in_each_epoch(self, epoch):
+        self.S_topk_dict = self.get_topk_dict(self.student)
+        if epoch < self.warmup:
+            self.mask_all = torch.ones((self.num_users, 2 * self.K)).cuda().float()
+        else:
+            with torch.no_grad():
+                top_dict = torch.cat([self.S_topk_dict, self.T_topk_dict], dim=-1)
+                users = self.student.get_user_embedding(self.user_list) # Nu, Sdim
+                items = self.student.get_item_embedding(self.item_list) # Ni, Sdim
+                proj_users = self.projector_u(users)    # Nu, Tdim
+                proj_items = self.projector_i(items)    # Ni, Tdim
+                scores = users.mm(items.T)
+                proj_scores = proj_users.mm(proj_items.T)
+                scores = scores[self.user_list.unsqueeze(-1), top_dict]
+                proj_scores = proj_scores[self.user_list.unsqueeze(-1), top_dict]
+                rk = torch.sort(torch.sort(scores, dim=1, descending=True)[1], dim=1)[1]
+                proj_rk = torch.sort(torch.sort(proj_scores, dim=1, descending=True)[1], dim=1)[1]
+                self.mask_all = torch.exp(-(rk - proj_rk).pow(2) / self.sigma)  # Nu, 2K
+                
+    def get_features(self, batch_entity, is_user):
+        if is_user:
+            s = self.student.get_user_embedding(batch_entity)
+            t = self.teacher.get_user_embedding(batch_entity)
+            s_proj = self.projector_u(s)
+        else:
+            s = self.student.get_item_embedding(batch_entity)
+            t = self.teacher.get_item_embedding(batch_entity)
+            s_proj = self.projector_i(s)
+        return t, s, s_proj
+    
+    def DE_loss(self, batch_entity, is_user):
+        T_feas, S_feas, S_proj_feas = self.get_features(batch_entity, is_user)
+        G_diff = (T_feas - S_proj_feas).pow(2).sum(-1)
+        DE_loss = G_diff.sum()
+        return DE_loss
+    
+    def feature_loss(self, size):
+        u = torch.LongTensor(np.random.choice(np.array([i for i in range(self.num_users)]), size, replace=False)).cuda()
+        i = torch.LongTensor(np.random.choice(np.array([i for i in range(self.num_items)]), size, replace=False)).cuda()
+        DE_loss_user = self.DE_loss(u, True)
+        DE_loss_item = self.DE_loss(i, False)
+        DE_loss = DE_loss_user + DE_loss_item
+        return DE_loss
+    
+    def ce_loss(self, logit_T, logit_S, weight=None):
+        prob_T = torch.softmax(logit_T / self.tau, dim=-1)
+        prob_S = torch.softmax(logit_S / self.tau, dim=-1)
+        loss = -prob_T * torch.log(prob_S)
+        if weight is not None:
+            loss *= weight
+        loss = loss.sum()
+        return loss
+    
+    def logit_loss(self, batch_users):
+        itemS = self.S_topk_dict[batch_users]
+        itemT = self.T_topk_dict[batch_users]
+        item_all = torch.cat([itemS, itemT], -1)
+        logit_T_itemS = self.teacher.forward_multi_items(batch_users, itemS)
+        logit_S_itemS = self.student.forward_multi_items(batch_users, itemS)
+        loss_itemS = self.ce_loss(logit_T_itemS, logit_S_itemS)
+
+        logit_T_all = self.teacher.forward_multi_items(batch_users, item_all)
+        logit_S_all = self.student.forward_multi_items(batch_users, item_all)
+        mask_all = self.mask_all[batch_users]   # bs, 2K
+        if self.verbose:
+            mlflow.log_metric("mask_all", mask_all.mean())
+        loss_all = self.ce_loss(logit_T_all, logit_S_all, weight=mask_all)
+
+        loss = (1. - self.wa) * loss_itemS + self.wa * loss_all
+        return loss
+    
+    def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
+        logit_loss = self.logit_loss(batch_users)
+        feature_loss = self.feature_loss(len(batch_users))
+        loss = (1. - self.beta) * logit_loss + self.beta * feature_loss
+        return loss
+
+
+class rndD(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "rndd"
+        self.sigma = args.rndd_sigma
+        self.dropout_rate = args.dropout_rate
+        self.student_dim = self.student.embedding_dim
+        self.teacher_dim = self.teacher.embedding_dim
+        self.projector_u = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate)
+        self.projector_i = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate)
+
+    def get_features(self, batch_entity, is_user):
+        if is_user:
+            s = self.student.get_user_embedding(batch_entity)
+            t = self.teacher.get_user_embedding(batch_entity)
+            noise = torch.randn_like(s) * self.sigma
+            s_proj = self.projector_u(s + noise)
+        else:
+            s = self.student.get_item_embedding(batch_entity)
+            t = self.teacher.get_item_embedding(batch_entity)
+            noise = torch.randn_like(s) * self.sigma
+            s_proj = self.projector_i(s + noise)
+        return t, s_proj
+    
+    def get_DE_loss(self, batch_entity, is_user):
+        T_feas, S_feas = self.get_features(batch_entity, is_user)
+        G_diff = (T_feas - S_feas).pow(2).sum(-1)
+        DE_loss = G_diff.sum()
+        return DE_loss
+
+    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+        u = torch.LongTensor(np.random.choice(np.array([i for i in range(self.num_users)]), len(batch_user), replace=False)).cuda()
+        i = torch.LongTensor(np.random.choice(np.array([i for i in range(self.num_items)]), len(batch_user), replace=False)).cuda()
+        DE_loss_user = self.get_DE_loss(u, True)
+        DE_loss_item = self.get_DE_loss(i, False)
+        DE_loss = DE_loss_user + DE_loss_item
+        return DE_loss
+
+
+class CKD(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "ckd"
+        self.tau = args.ckd_tau
+        self.K = args.ckd_K
+        self.guide = args.ckd_guide
+        self.init_ratio = args.ckd_init
+        self.final_ratio = args.ckd_final
+        self.grouth = args.ckd_grouth
+        self.ratio = self.init_ratio
+        if self.guide == "teacher":
+            self.topk_dict = self.get_topk_dict(self.teacher)
+
+    def get_topk_dict(self, model):
+        print('Generating Top-K dict...')
+        with torch.no_grad():
+            inter_mat = model.get_all_ratings()
+            _, topk_dict = torch.topk(inter_mat, self.K, dim=-1)
+        return topk_dict.type(torch.LongTensor).cuda()
+    
+    def do_something_in_each_epoch(self, epoch):
+        if self.guide == "student":
+            self.topk_dict = self.get_topk_dict(self.student)
+        self.ratio = self.init_ratio + (self.final_ratio - self.init_ratio) * min(1, epoch / self.grouth)
+    
+    def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
+        logit_T = self.teacher.forward_multi_items(batch_users, self.topk_dict[batch_users])
+        logit_S = self.student.forward_multi_items(batch_users, self.topk_dict[batch_users])
+        prob_T = torch.softmax(logit_T / self.tau, dim=-1)
+        loss = F.cross_entropy(logit_S / self.tau, prob_T, reduction='none')
+        loss = loss[loss.argsort(descending=True)[:math.ceil(self.ratio * len(loss))]].sum() / self.ratio
+        return loss
+
+
 class HetD(BaseKD4CTR):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
