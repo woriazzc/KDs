@@ -122,7 +122,7 @@ def main(args):
     Evaluator.print_final_result(logger, eval_dict)
     if not args.no_save:
         embedding_dim = Teacher.embedding_dim if args.train_teacher else Student.embedding_dim
-        save_dir = os.path.join("checkpoints", args.dataset, args.S_backbone, f"{args.model.lower()}-{embedding_dim}")
+        save_dir = os.path.join("checkpoints", args.dataset, args.S_backbone, f"{args.model.lower()}-{embedding_dim}" + ('_' if args.suffix != '' else '') + args.suffix)
         os.makedirs(save_dir, exist_ok=True)
         torch.save(best_model, os.path.join(save_dir, "BEST_EPOCH.pt"))
         for idx, ckpt in enumerate(ckpts):
