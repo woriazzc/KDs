@@ -28,8 +28,13 @@ class CPD(DE):
         self.Q = args.cpd_Q
 
         if self.args.ablation:
-            self.sample_type = "none"
-            self.reg_type = "none"
+            if self.args.verbose:
+                self.sample_type = "rank"
+                self.reg_type = "none"
+                self.guide_type = "teacher"
+            else:
+                self.sample_type = "none"
+                self.reg_type = "none"
         
         if self.reg_type == "list":
             self.tau_ce = args.cpd_tau_ce
