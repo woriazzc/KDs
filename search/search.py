@@ -39,14 +39,14 @@ def get_gpu():
             return gid
     return -1
 
-if len(sys.argv) == 3 and sys.argv[2] in ['-c', '-C', '-d', '-D']:
+if len(sys.argv) == 3 and sys.argv[2] in ['-c', '-C', '-r', '-R']:
     is_continue = True
-    if sys.argv[2] in ['-d', '-D']:
+    if sys.argv[2] in ['-c', '-C']:
         print('Continue Mode.')
-        run_all = True
+        run_all = False
     else:
         print('Continue Mode (run all).')
-        run_all = False
+        run_all = True
 else:
     is_continue = False
 
