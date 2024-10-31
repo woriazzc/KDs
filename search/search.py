@@ -39,9 +39,14 @@ def get_gpu():
             return gid
     return -1
 
-if len(sys.argv) == 3 and sys.argv[2] in ['-c', '-C']:
+if len(sys.argv) == 3 and sys.argv[2] in ['-c', '-C', '-d', '-D']:
     is_continue = True
-    print('Continue Mode.')
+    if sys.argv[2] in ['-d', '-D']:
+        print('Continue Mode.')
+        run_all = True
+    else:
+        print('Continue Mode (run all).')
+        run_all = False
 else:
     is_continue = False
 
@@ -80,8 +85,13 @@ if __name__ == '__main__':
         if is_continue and os.path.exists(f_log):
             with open(f_log, 'r') as f:
                 # TODO: must change to fit new output format
-                if 'avg test Recall' in f.read():
-                    continue
+                if run_all:
+                    if 'avg test Recall' in f.read():
+                        continue
+                else:
+                    s = f.read()
+                    if "test Recall" in s[max(10000, len(s) // 2):]:
+                        continue
 
         stdout_file = open(f_log, 'w')
         stderr_file = open(f_log, 'w')
