@@ -1263,6 +1263,7 @@ class MKD(BaseKD4Rec):
         self.K = args.mkd_K
         self.wT = args.mkd_wT
         self.wa = args.mkd_wa
+        self.loss_type = args.loss_type
         self.T_topk_dict = self.get_topk_dict(self.teacher)
 
     def get_topk_dict(self, model):
@@ -1280,24 +1281,164 @@ class MKD(BaseKD4Rec):
         loss = F.cross_entropy(logit_S / self.tau, prob_T, reduction='sum')
         return loss
     
+    def rrd_loss(self, logit_T, logit_S):
+        sorted_idx = torch.argsort(logit_T, dim=-1, descending=True)
+        logit_T = torch.minimum(logit_T, torch.tensor(80., device=logit_T.device))     # avoid math overflow
+        logit_S = torch.minimum(logit_S, torch.tensor(80., device=logit_S.device))
+        dec_logit_T = logit_T[torch.arange(len(logit_T)).unsqueeze(-1), sorted_idx]
+        dec_logit_S = logit_S[torch.arange(len(logit_S)).unsqueeze(-1), sorted_idx]
+        above = dec_logit_S.sum(-1)
+        below = dec_logit_S.flip(-1).exp().cumsum(-1)
+        below = below.log().sum(-1)
+        loss = -(above - below).sum()
+        return loss
+    
     def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
         itemS = self.S_topk_dict[batch_users]
         itemT = self.T_topk_dict[batch_users]
         item_all = torch.cat([itemS, itemT], -1)
         logit_T_itemS = self.teacher.forward_multi_items(batch_users, itemS)
         logit_S_itemS = self.student.forward_multi_items(batch_users, itemS)
-        loss_itemS = self.ce_loss(logit_T_itemS, logit_S_itemS)
+        if self.loss_type == 'ce':
+            loss_func = self.ce_loss
+        else:
+            loss_func = self.rrd_loss
+        loss_itemS = loss_func(logit_T_itemS, logit_S_itemS)
         loss = (1. - self.wT - self.wa) * loss_itemS
         if self.wT > 0:
             logit_T_itemT = self.teacher.forward_multi_items(batch_users, itemT)
             logit_S_itemT = self.student.forward_multi_items(batch_users, itemT)
-            loss_itemT = self.ce_loss(logit_T_itemT, logit_S_itemT)
+            loss_itemT = loss_func(logit_T_itemT, logit_S_itemT)
             loss += self.wT * loss_itemT
         if self.wa > 0:
             logit_T_all = self.teacher.forward_multi_items(batch_users, item_all)
             logit_S_all = self.student.forward_multi_items(batch_users, item_all)
-            loss_all = self.ce_loss(logit_T_all, logit_S_all)
+            loss_all = loss_func(logit_T_all, logit_S_all)
             loss += self.wa * loss_all
+        return loss
+
+
+class MRRD(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        
+        self.K = args.mrrd_K
+        self.L = args.mrrd_L
+        self.T = args.mrrd_T
+        self.mxK = args.mrrd_mxK
+        self.beta = args.mrrd_beta
+        self.use_ce = args.mrrd_use_ce
+
+        # For interesting item
+        self.get_topk_dict()
+        ranking_list = torch.exp(-(torch.arange(self.mxK) + 1) / self.T)
+        self.ranking_mat = ranking_list.repeat(self.num_users, 1)
+
+        # For uninteresting item
+        self.mask = torch.ones((self.num_users, self.num_items))
+        train_pairs = self.dataset.train_pairs
+        self.mask[train_pairs[:, 0], train_pairs[:, 1]] = 0
+        for user in range(self.num_users):
+            self.mask[user, self.topk_dict[user]] = 0
+        self.mask.requires_grad = False
+
+    def get_topk_dict(self):
+        print('Generating Top-K dict...')
+        with torch.no_grad():
+            inter_mat = self.teacher.get_all_ratings()
+            train_pairs = self.dataset.train_pairs
+            # remove true interactions from topk_dict
+            inter_mat[train_pairs[:, 0], train_pairs[:, 1]] = -1e6
+            _, self.topk_dict = torch.topk(inter_mat, self.mxK, dim=-1)
+    
+    def get_samples(self, batch_user):
+
+        interesting_samples = torch.index_select(self.interesting_items, 0, batch_user)
+        uninteresting_samples = torch.index_select(self.uninteresting_items, 0, batch_user)
+
+        return interesting_samples, uninteresting_samples
+
+    def do_something_in_each_epoch(self, epoch):
+        with torch.no_grad():
+            # interesting items
+            self.interesting_items = torch.zeros((self.num_users, self.K))
+
+            # sampling
+            while True:
+                samples = torch.multinomial(self.ranking_mat, self.K, replacement=False)
+                if (samples > self.mxK).sum() == 0:
+                    break
+
+            samples = samples.sort(dim=1)[0]
+            
+            for user in range(self.num_users):
+                self.interesting_items[user] = self.topk_dict[user][samples[user]]
+
+            self.interesting_items = self.interesting_items.cuda()
+
+            # uninteresting items
+            m1 = self.mask[: self.num_users // 2, :].cuda()
+            tmp1 = torch.multinomial(m1, self.L, replacement=False)
+            del m1
+
+            m2 = self.mask[self.num_users // 2 : ,:].cuda()
+            tmp2 = torch.multinomial(m2, self.L, replacement=False)
+            del m2
+
+            self.uninteresting_items = torch.cat([tmp1, tmp2], 0)
+    
+    def relaxed_ranking_loss(self, S1, S2, T1, T2):
+        S1 = torch.minimum(S1, torch.tensor(80., device=S1.device))     # This may help
+        S2 = torch.minimum(S2, torch.tensor(80., device=S2.device))
+        above = S1.sum(-1)
+        below1 = S1.flip(-1).exp().cumsum(-1)    # exp() of interesting_prediction results in inf
+        below2 = S2.exp().sum(-1, keepdims=True)
+        below = (below1 + below2).log().sum(-1)
+        loss = -(above - below).sum()
+        # rk_prob = self.rk_prob(T1, T2)
+        # loss = -((above - below) * rk_prob).sum()
+        return loss
+    
+    def rk_prob(self, logit1, logit2):
+        logit1 = torch.minimum(logit1, torch.tensor(80., device=logit1.device))     # This may help
+        logit2 = torch.minimum(logit2, torch.tensor(80., device=logit2.device))
+        above = logit1.exp()
+        below1 = logit1.flip(-1).exp().cumsum(-1).flip(-1)    # exp() of interesting_prediction results in inf
+        below2 = logit2.exp().sum(-1, keepdims=True)
+        below = below1
+        prob = (above / below)[:, :1].prod(dim=-1)
+        return prob
+    
+    def mle_loss(self, subset_logits, all_logits, subset_logits_T, all_logits_T):
+        Z = all_logits.exp().sum(-1, keepdim=True)
+        subset_probs = subset_logits.exp() / Z
+        if self.use_ce:
+            Z_T = all_logits_T.exp().sum(-1, keepdim=True)
+            subset_probs_T = subset_logits_T.exp() / Z_T
+            loss = -(subset_probs_T * torch.log(subset_probs)).sum()
+        else:
+            loss = -subset_probs.log().sum()
+        return loss
+    
+    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+        users = batch_user.unique()
+        interesting_items, uninteresting_items = self.get_samples(users)
+        interesting_items = interesting_items.type(torch.LongTensor).cuda()
+        uninteresting_items = uninteresting_items.type(torch.LongTensor).cuda()
+
+        interesting_prediction = self.student.forward_multi_items(users, interesting_items)
+        uninteresting_prediction = self.student.forward_multi_items(users, uninteresting_items)
+        topk_prediction = self.student.forward_multi_items(users, self.topk_dict[users])
+
+        T_interesting_prediction = self.teacher.forward_multi_items(users, interesting_items)
+        T_uninteresting_prediction = self.teacher.forward_multi_items(users, uninteresting_items)
+        T_topk_prediction = self.teacher.forward_multi_items(users, self.topk_dict[users])
+
+        rrd_loss = self.relaxed_ranking_loss(interesting_prediction, uninteresting_prediction, T_interesting_prediction, T_uninteresting_prediction)
+        if self.beta > 0:
+            mle_loss = self.mle_loss(interesting_prediction, topk_prediction, T_interesting_prediction, T_topk_prediction)
+        else: mle_loss = 0.
+        loss = (1. - self.beta) * rrd_loss + self.beta * mle_loss
         return loss
 
 

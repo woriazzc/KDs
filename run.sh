@@ -41,6 +41,7 @@ python -u main.py --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --train_
 python -u main.py --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=hetcomp
 python -u main.py --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=de
 python -u main.py --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=rrd
+python -u main.py --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=dcd
 python -u main.py --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=cpd
 python -u main.py --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=nkd
 python -u main.py --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=graphd
