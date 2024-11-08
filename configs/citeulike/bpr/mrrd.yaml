@@ -3,7 +3,7 @@ bpr:
   batch_size: 2048
   lr: 1.e-3
   wd: 1.e-7
-  lmbda: 0.01
+  lmbda: 10
 
   mrrd_K: 100
   mrrd_L: 200
