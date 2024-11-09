@@ -3,11 +3,13 @@ bpr:
   batch_size: 2048
   lr: 1.e-3
   wd: 1.e-7
-  lmbda: 10
+  lmbda: 0.005
 
   mrrd_K: 100
   mrrd_L: 200
   mrrd_T: 10
   mrrd_mxK: 500
-  mrrd_beta: 0.2
+  mrrd_beta: 0.1
   mrrd_use_ce: False
+  rrd_all: True
+  no_neg: False
