@@ -10,6 +10,9 @@ bpr:
   mrrd_T: 10
   mrrd_mxK: 500
   mrrd_beta: 0.1
-  mrrd_use_ce: False
-  rrd_all: True
-  no_neg: False
+  no_sort: False
+  loss_type: rrd
+  sample_rank: True
+  mrrd_tau: 1.0
+  mrrd_gamma: 1.0
+  mrrd_test_type: 0

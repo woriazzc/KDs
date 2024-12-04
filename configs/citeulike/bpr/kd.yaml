@@ -3,9 +3,9 @@ bpr:
   batch_size: 2048
   lr: 1.e-3
   wd: 1.e-7
-  lmbda: 5.0
+  lmbda: 1
   kd_tau: 1
-  kd_K: 200
+  kd_K: 50
   kd_guide: student
 lightgcn:
   epochs: 1000
