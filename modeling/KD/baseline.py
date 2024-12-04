@@ -347,11 +347,16 @@ class RRD(BaseKD4Rec):
         self.L = args.rrd_L
         self.T = args.rrd_T
         self.mxK = args.rrd_mxK
+        self.sample_from_score = args.sample_from_score
+        self.no_sort = args.no_sort
 
         # For interesting item
         self.get_topk_dict()
-        ranking_list = torch.exp(-(torch.arange(self.mxK) + 1) / self.T)
-        self.ranking_mat = ranking_list.repeat(self.num_users, 1)
+        if self.sample_from_score:
+            self.ranking_mat = torch.softmax(self.top_score / self.T, dim=-1)
+        else:
+            ranking_list = torch.exp(-(torch.arange(self.mxK) + 1) / self.T)
+            self.ranking_mat = ranking_list.repeat(self.num_users, 1)
 
         # For uninteresting item
         self.mask = torch.ones((self.num_users, self.num_items))
@@ -368,7 +373,7 @@ class RRD(BaseKD4Rec):
             train_pairs = self.dataset.train_pairs
             # remove true interactions from topk_dict
             inter_mat[train_pairs[:, 0], train_pairs[:, 1]] = -1e6
-            _, self.topk_dict = torch.topk(inter_mat, self.mxK, dim=-1)
+            self.top_score, self.topk_dict = torch.topk(inter_mat, self.mxK, dim=-1)
     
     def get_samples(self, batch_user):
 
@@ -388,8 +393,9 @@ class RRD(BaseKD4Rec):
                 samples = torch.multinomial(self.ranking_mat, self.K, replacement=False)
                 if (samples > self.mxK).sum() == 0:
                     break
-
-            samples = samples.sort(dim=1)[0]
+            
+            if not self.no_sort:
+                samples = samples.sort(dim=1)[0]
 
             for user in range(self.num_users):
                 self.interesting_items[user] = self.topk_dict[user][samples[user]]
@@ -507,7 +513,7 @@ class DCD(BaseKD4Rec):
 
         if self.ablation:
             underestimated_prediction_T = self.teacher.forward_multi_items(users, underestimated_items)
-            overestimated_prediction_T = self.student.forward_multi_items(users, overestimated_items)
+            overestimated_prediction_T = self.teacher.forward_multi_items(users, overestimated_items)
             prediction_T = torch.concat([underestimated_prediction_T, overestimated_prediction_T], dim=-1)
             prediction_S = torch.concat([underestimated_prediction, overestimated_prediction], dim=-1)
             loss = self.ce_loss(prediction_T, prediction_S)

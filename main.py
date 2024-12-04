@@ -46,7 +46,10 @@ def main(args):
         Teacher.load_state_dict(torch.load(T_path))
         all_models = [e.lower() for e in dir(KD)]
         if args.model.lower() in all_models:
-            model = getattr(KD, dir(KD)[all_models.index(args.model.lower())])(args, Teacher, Student).cuda()
+            if args.model.lower() == "mrrd":
+                model = getattr(KD, dir(KD)[all_models.index(args.model.lower())])(args, Teacher, Student, valid_dict, test_dict).cuda()
+            else:
+                model = getattr(KD, dir(KD)[all_models.index(args.model.lower())])(args, Teacher, Student).cuda()
         else:
             logger.log(f'Invalid model {args.model}.')
             raise(NotImplementedError, f'Invalid model {args.model}.')

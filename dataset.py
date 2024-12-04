@@ -161,9 +161,7 @@ class implicit_CF_dataset_test(data.Dataset):
         num_items : int
             num. items
         inter_dict: dict
-            user as keys, valid item as values
-        test_dict: dict
-            user as keys, test item as values
+            user as keys, valid/test item as values
         """
         super(implicit_CF_dataset_test, self).__init__()
 
