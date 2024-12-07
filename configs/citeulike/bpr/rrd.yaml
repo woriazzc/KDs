@@ -15,7 +15,7 @@ lightgcn:
   batch_size: 2048
   lr: 1.e-3
   wd: 1.e-5
-  lmbda: 0.1
+  lmbda: 0.05
   rrd_K: 100
   rrd_L: 200
   rrd_T: 10
