@@ -174,6 +174,121 @@ class LightGCN(BaseGCN):
         return users, items
 
 
+# Refer to https://github.com/wu1hong/SCCF/blob/master/recbole/model/general_recommender/sccf.py
+def xavier_normal_initialization(module):
+        if isinstance(module, nn.Embedding):
+            nn.init.xavier_normal_(module.weight.data)
+        elif isinstance(module, nn.Linear):
+            nn.init.xavier_normal_(module.weight.data)
+            if module.bias is not None:
+                nn.init.constant_(module.bias.data, 0)
+
+class SCCF(BaseRec):
+    def __init__(self, dataset, args):
+        super().__init__(dataset, args)
+        self.model_name = "sccf"
+        self.embedding_dim = args.embedding_dim
+        self.temperature = args.sccf_temperature
+        self.user_emb = nn.Embedding(self.num_users, self.embedding_dim)
+        self.item_emb = nn.Embedding(self.num_items, self.embedding_dim)
+        self.apply(xavier_normal_initialization)
+
+    def encode_with_norm(self, batch_user, batch_item):
+        user_e = self.user_emb(batch_user)
+        item_e = self.item_emb(batch_item)
+        return F.normalize(user_e, dim=-1), F.normalize(item_e, dim=-1)
+
+    def forward(self, batch_user, batch_item, _):
+        """
+        Parameters
+        ----------
+        batch_user : 1-D LongTensor (batch_size)
+        batch_item : 1-D LongTensor (batch_size)
+        _ : 2-D LongTensor (batch_size, num_ns), batch_negative_items, not used in this model
+
+        Returns
+        -------
+        output : 
+            Model output to calculate its loss function
+        """
+        u_idx, u_inv_idx, u_counts = torch.unique(batch_user, return_counts=True, return_inverse=True)
+        i_idx, i_inv_idx, i_counts = torch.unique(batch_item, return_counts=True, return_inverse=True)
+        u_counts, i_counts = u_counts.reshape(-1, 1).float(), i_counts.reshape(-1, 1).float()
+        user_e, item_e = self.encode_with_norm(batch_user, batch_item)
+        ip = (user_e * item_e).sum(dim=1)
+        up_score = (ip / self.temperature).exp() + (ip ** 2 / self.temperature).exp()
+        up = up_score.log().mean()
+        user_e, item_e = self.encode_with_norm(u_idx, i_idx)
+        sim_mat = user_e @ item_e.T
+        score = (sim_mat / self.temperature).exp() + (sim_mat ** 2 / self.temperature).exp()
+        down = (score * (u_counts @ i_counts.T)).mean().log()
+        return up, down
+    
+    def get_loss(self, output):
+        """Compute the loss function with the model output
+
+        Parameters
+        ----------
+        output : 
+            model output (results of forward function)
+
+        Returns
+        -------
+        loss : float
+        """
+        up, down = output
+        loss = -up + down
+        return loss
+
+    def forward_multi_items(self, batch_user, batch_items):
+        """forward when we have multiple items for a user
+
+        Parameters
+        ----------
+        batch_user : 1-D LongTensor (batch_size)
+        batch_items : 2-D LongTensor (batch_size x k)
+
+        Returns
+        -------
+        score : 2-D FloatTensor (batch_size x k)
+        """
+        
+        u = self.user_emb(batch_user)		# batch_size x dim
+        i = self.item_emb(batch_items)		# batch_size x k x dim
+        score = torch.bmm(i, u.unsqueeze(-1)).squeeze(-1)   # batch_size, k
+        return score
+
+    def get_user_embedding(self, batch_user):
+        return self.user_emb(batch_user)
+    
+    def get_item_embedding(self, batch_item):
+        return self.item_emb(batch_item)
+
+    def get_all_embedding(self):
+        """get total embedding of users and items
+
+        Returns
+        -------
+        users : 2-D FloatTensor (num. users x dim)
+        items : 2-D FloatTensor (num. items x dim)
+        """
+        users = self.user_emb(self.user_list)
+        items = self.item_emb(self.item_list)
+
+        return users, items
+    
+    def get_all_ratings(self):
+        users, items = self.get_all_embedding()
+        score_mat = torch.matmul(users, items.T)
+        return score_mat
+    
+    def get_ratings(self, batch_user):
+        users = self.get_user_embedding(batch_user.cuda())
+        items = self.get_item_embedding(self.item_list)
+        score_mat = torch.matmul(users, items.T)
+        return score_mat
+
+
 # Refer to https://github.com/reczoo/RecZoo/blob/main/matching/cf/SimpleX/src/SimpleX.py
 class SimpleX(BaseRec):
     def __init__(self, dataset, args):

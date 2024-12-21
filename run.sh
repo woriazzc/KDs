@@ -9,6 +9,7 @@ python -u main.py --dataset=citeulike --S_backbone=bpr --train_teacher --teacher
 python -u main.py --dataset=citeulike --S_backbone=lightgcn --train_teacher --teacher embedding_dim=2000 num_layers=3 --cfg wd=1e-7 --suffix teacher
 python -u main.py --dataset=citeulike --S_backbone=simplex --train_teacher --teacher embedding_dim=500 --cfg wd=1e-5 num_ns=2000 --suffix teacher
 python -u main.py --dataset=citeulike --S_backbone=xsimgcl --train_teacher --suffix teacher
+python -u main.py --dataset=citeulike --S_backbone=sccf --train_teacher --suffix teacher
 
 python -u main.py --dataset=gowalla --S_backbone=bpr --train_teacher --teacher embedding_dim=300 --cfg wd=1e-4 --suffix teacher
 python -u main.py --dataset=gowalla --S_backbone=lightgcn --train_teacher --teacher embedding_dim=2000 num_layers=4 --cfg wd=1e-6 --suffix teacher

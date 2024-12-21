@@ -1,0 +1,34 @@
+bpr:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-7
+  lmbda: 0.005
+  mrrd_K: 100
+  mrrd_L: 200
+  mrrd_T: 10
+  mrrd_mxK: 500
+  mrrd_beta: 0.1
+  no_sort: False
+  loss_type: rrd
+  sample_rank: True
+  mrrd_tau: 1.0
+  mrrd_gamma: 1.0
+  mrrd_test_type: 0
+lightgcn:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-7
+  lmbda: 0.005
+  mrrd_K: 100
+  mrrd_L: 200
+  mrrd_T: 10
+  mrrd_mxK: 500
+  mrrd_beta: 0.1
+  no_sort: False
+  loss_type: rrd
+  sample_rank: True
+  mrrd_tau: 1.0
+  mrrd_gamma: 1.0
+  mrrd_test_type: 0

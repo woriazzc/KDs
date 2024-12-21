@@ -1,4 +1,4 @@
-Chronologically-ordered Foursquare_TKY dataset.
+CiteULike-t dataset.
 processed by preprocess_citeulike.py
 origin file "users.dat" downloaded from https://github.com/changun/CollMetric/tree/master/citeulike-t
 

@@ -74,7 +74,7 @@ def load_cf_data(dataset_name):
 
 class implicit_CF_dataset(data.Dataset):
 
-    def __init__(self, dataset, num_users, num_items, train_pairs, train_mat, train_dict, user_pop, item_pop, num_ns, neg_sampling_on_all=False):
+    def __init__(self, dataset, num_users, num_items, train_pairs, train_mat, train_dict, user_pop, item_pop, num_ns, neg_sampling_on_all=False, no_neg_sampling=False):
         """
         Parameters
         ----------
@@ -97,7 +97,9 @@ class implicit_CF_dataset(data.Dataset):
         num_ns : int
             num. negative samples
         neg_sampling_on_all: Bool
-            if True, don't ignore positive items when negative sampling (defalut: False)
+            if True, don't ignore positive items when negative sampling (default: False)
+        no_neg_sampling: Bool
+            if True, return zero vectors (default: False)
         """
         super(implicit_CF_dataset, self).__init__()
         
@@ -111,19 +113,27 @@ class implicit_CF_dataset(data.Dataset):
         self.item_pop = item_pop
         self.num_ns = num_ns
         self.neg_sampling_on_all = neg_sampling_on_all
+        self.no_neg_sampling = no_neg_sampling
 
         self.users, self.pos_items, self.neg_items = None, None, None
 
     def negative_sampling(self):
         """conduct the negative sampling
         """
-        users = []
-        pos_items = []
-        neg_items = []
+        if self.no_neg_sampling:
+            users, pos_items = self.train_pairs[:, 0].numpy(), self.train_pairs[:, 1].numpy()
+            neg_items = np.zeros((self.train_pairs.size(0), self.num_ns))
+            self.users = torch.from_numpy(users)
+            self.pos_items = torch.from_numpy(pos_items)
+            self.neg_items = torch.from_numpy(neg_items)
+            return
         if self.neg_sampling_on_all:
             users, pos_items = self.train_pairs[:, 0].numpy(), self.train_pairs[:, 1].numpy()
             neg_items = np.random.choice(self.num_items, size=(self.train_pairs.size(0), self.num_ns), replace=True)
         else:
+            users = []
+            pos_items = []
+            neg_items = []
             for user, pos in self.train_dict.items():
                 pos = pos.numpy()
                 users.append(np.array([user]).repeat(len(pos)))
