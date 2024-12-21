@@ -1264,12 +1264,14 @@ class MKD(BaseKD4Rec):
         self.K = args.mkd_K
         self.beta = args.mkd_beta
         self.T = args.mkd_T
+        self.T2 = args.mkd_T2
         self.L = args.mkd_L
         self.mxK = args.mkd_mxK
-
+        self.sample_rank = args.sample_rank
         self.T_topk_dict = self.get_topk_dict(self.teacher, self.K)
-        ranking_list = torch.exp(-(torch.arange(self.mxK) + 1) / self.T)
-        self.ranking_mat = ranking_list.repeat(self.num_users, 1)
+        if self.sample_rank:
+            ranking_list = torch.exp(-(torch.arange(self.mxK) + 1) / self.T)
+            self.ranking_mat = ranking_list.repeat(self.num_users, 1)
 
     def get_topk_dict(self, model, mxK):
         print('Generating Top-K dict...')
@@ -1278,12 +1280,25 @@ class MKD(BaseKD4Rec):
             _, topk_dict = torch.topk(inter_mat, mxK, dim=-1)
         return topk_dict.type(torch.LongTensor).cuda()
     
+    # https://discuss.pytorch.org/t/find-indexes-of-elements-from-one-tensor-that-matches-in-another-tensor/147482/3
+    def rowwise_index(self, source, target):
+        idx = (target.unsqueeze(1) == source.unsqueeze(2)).nonzero()
+        idx = idx[:, [0, 2]]
+        return idx
+
     def do_something_in_each_epoch(self, epoch):
         with torch.no_grad():
             S_topk_dict = self.get_topk_dict(self.student, self.mxK)
             self.interesting_items = torch.zeros((self.num_users, self.L)).long()
-            samples = torch.multinomial(self.ranking_mat, self.L, replacement=False)
-            samples = samples.sort(dim=1)[0]
+            if self.sample_rank:
+                samples = torch.multinomial(self.ranking_mat, self.L, replacement=False)
+            else:
+                weight_matrix = torch.zeros((self.num_users, self.mxK)).cuda()
+                itemT_rankS = self.rowwise_index(self.T_topk_dict, S_topk_dict)
+                weight_matrix[itemT_rankS[:, 0], itemT_rankS[:, 1]] += 1
+                weight_matrix = torch.minimum(torch.cumsum(weight_matrix.flip(-1), dim=-1).flip(-1), torch.tensor(50.))
+                weight_matrix = torch.exp((weight_matrix + 1) / self.T)
+                samples = torch.multinomial(weight_matrix, self.L, replacement=False)
             for user in range(self.num_users):
                 self.interesting_items[user] = S_topk_dict[user][samples[user]]
             self.interesting_items = self.interesting_items.cuda()
@@ -1324,6 +1339,11 @@ class MKD(BaseKD4Rec):
         exp_logit_S_interesting = torch.exp(logit_S_interesting)
         Z_S = exp_logit_S_interesting.sum(-1, keepdim=True) + exp_logit_S_itemT.sum(-1, keepdim=True)
         logit_S_all = torch.cat([logit_S_interesting, logit_S_itemT], dim=-1)
+        if self.sample_rank:
+            decay_weight = torch.ones_like(prob_T_all)
+            ranking_list = torch.exp(-(torch.arange(self.K) + 1) / self.T2)
+            decay_weight[:, item_interesting.shape[-1]:] = ranking_list.repeat(len(prob_T_all), 1)
+            prob_T_all = prob_T_all * decay_weight
         loss_itemT = -(prob_T_all * (logit_S_all - torch.log(Z_S))).sum(-1)
 
         overlap = mask.float().mean(-1)
@@ -1391,6 +1411,8 @@ class MRRD(BaseKD4Rec):
                 for u in range(self.num_users):
                     tr_idx, te_idx = torch.utils.data.random_split(torch.arange(self.mxK + self.test_K), [self.mxK, self.test_K])
                     train_idx[u], test_idx[u] = torch.tensor(tr_idx).sort()[0].long(), torch.tensor(te_idx).sort()[0].long()
+                os.makedirs(os.path.dirname(f_train_idx), exist_ok=True)
+                os.makedirs(os.path.dirname(f_test_idx), exist_ok=True)
                 np.save(f_train_idx, train_idx.cpu().numpy())
                 np.save(f_test_idx, test_idx.cpu().numpy())
             else:
