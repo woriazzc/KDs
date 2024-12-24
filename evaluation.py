@@ -9,6 +9,7 @@ import torch.utils.data as data
 
 from utils import to_np
 from utils.metric import Precision, Recall, NDCG, get_labels
+from dataset import implicit_SR_dataset
 
 
 METRIC2FUNC = {'Recall': Recall, 'NDCG': NDCG, 'Precision': Precision, 'AUC': roc_auc_score, 'LogLoss': log_loss}
@@ -71,9 +72,11 @@ class Evaluator:
         test_dict = test_dataset.inter_dict
         num_users = train_loader.dataset.num_users
         num_items = train_loader.dataset.num_items
+        if isinstance(train_loader.dataset, implicit_SR_dataset):
+            num_items += 1  # include 0
 
         model.eval()
-        test_loader = data.DataLoader(list(test_dict.keys()), batch_size=train_loader.batch_size)
+        test_loader = data.DataLoader(list(test_dict.keys()), batch_size=max(train_loader.batch_size, 1024))
         topK_items = torch.zeros((num_users, self.K_max), dtype=torch.long)
         for batch_user in test_loader:
             score_mat = model.get_ratings(batch_user)

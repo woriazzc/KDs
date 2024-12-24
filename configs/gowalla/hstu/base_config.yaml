@@ -1,14 +1,4 @@
 teacher:
-  bpr:
-    init_std: 1.e-2
-    embedding_dim: 300
-  lightgcn:
-    init_std: 0.1
-    keep_prob: 0.6
-    A_split: False
-    dropout: False
-    embedding_dim: 2000
-    num_layers: 4
   hstu:
     max_sequence_len: 100
     embedding_dim: 64
@@ -27,5 +17,19 @@ teacher:
     dropout_rate: 0.5
     temperature: 0.05
 student:
-  init_std: 1.e-2
-  embedding_dim: 20
+  max_sequence_len: 100
+  embedding_dim: 64
+  num_blocks: 4
+  num_heads: 4
+  attention_dim: 16
+  linear_dim: 16
+  linear_activation: silu
+  linear_dropout_rate: 0.5
+  attn_dropout_rate: 0.
+  enable_relative_attention_bias: True
+  concat_ua: False
+  normalization: rel_bias
+  max_output_len: 10
+  num_negatives: 512
+  dropout_rate: 0.5
+  temperature: 0.05

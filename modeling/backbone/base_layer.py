@@ -62,6 +62,7 @@ class BehaviorAggregator(nn.Module):
         return e_X / (e_X.sum(dim=1, keepdim=True) + 1.e-9)
 
 
+# For CTR models
 class Embedding(nn.Module):
     def __init__(self, embedding_dim, feature_stastic):
         super().__init__()

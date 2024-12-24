@@ -1,5 +1,6 @@
 import os
 import yaml
+import math
 import numpy as np
 import scipy.sparse as sp
 from scipy.sparse import csr_matrix
@@ -12,10 +13,11 @@ from .base_layer import Embedding
 from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls
 
 
-class BaseRec(nn.Module):
+class BaseCF(nn.Module):
     def __init__(self, dataset, args):
         super().__init__()
         
+        self.model_type = "cf"
         self.dataset = dataset
         self.args = args
 
@@ -69,7 +71,52 @@ class BaseRec(nn.Module):
         return loss
 
 
-class BaseGCN(BaseRec):
+class BaseSR(nn.Module):
+    def __init__(self, dataset, args):
+        super().__init__()
+        
+        self.model_type = "sr"
+        self.dataset = dataset
+        self.args = args
+
+        self.num_users = self.dataset.num_users
+        self.num_items = self.dataset.num_items
+
+        self.user_list = torch.LongTensor([i + 1 for i in range(self.num_users)]).cuda()
+        self.item_list = torch.LongTensor([i + 1 for i in range(self.num_items)]).cuda()
+    
+    def forward(self):
+        raise NotImplementedError
+    
+    def get_loss(self, output):
+        """Compute the loss function with the model output
+
+        Parameters
+        ----------
+        output : 
+            model output (results of forward function)
+
+        Returns
+        -------
+        loss : float
+        """
+        raise NotImplementedError
+    
+    def get_ratings(self, batch_user):
+        raise NotImplementedError
+    
+    def get_all_ratings(self):
+        batch_size = 1024
+        num_batch = math.ceil(self.num_users / batch_size)
+        all_scores = []
+        for i in range(num_batch):
+            batch_user = torch.arange(i * batch_size, min(self.num_users, (i + 1) * batch_size), dtype=torch.long).cuda()
+            all_scores.append(self.get_ratings(batch_user))
+        all_scores = torch.cat(all_scores, dim=0)
+        return all_scores
+
+
+class BaseGCN(BaseCF):
     def __init__(self, dataset, args):
         super().__init__(dataset, args)
 
@@ -235,6 +282,7 @@ class BaseGCN(BaseRec):
 class BaseCTR(nn.Module):
     def __init__(self, args, feature_stastic):
         super().__init__()
+        self.model_type = "ctr"
         self.args = args
         self.embedding_dim = args.embedding_dim
         self.L2_weight = args.L2

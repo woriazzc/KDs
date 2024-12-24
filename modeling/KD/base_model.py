@@ -36,7 +36,6 @@ class BaseKD(nn.Module):
         self.training = mode
         for module in self.children():
             module.train(mode)
-        self.teacher.eval()
         return self
 
     def eval(self):

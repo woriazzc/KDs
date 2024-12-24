@@ -8,6 +8,7 @@ import struct
 import numpy as np
 from tqdm import tqdm
 from pathlib import Path
+from copy import deepcopy
 from functools import lru_cache
 from collections import defaultdict
 
@@ -101,7 +102,7 @@ class implicit_CF_dataset(data.Dataset):
         no_neg_sampling: Bool
             if True, return zero vectors (default: False)
         """
-        super(implicit_CF_dataset, self).__init__()
+        super().__init__()
         
         self.dataset = dataset
         self.num_users = num_users
@@ -157,12 +158,42 @@ class implicit_CF_dataset(data.Dataset):
         return self.users[idx], self.pos_items[idx], self.neg_items[idx]
         
 
+class implicit_SR_dataset(data.Dataset):
+    def __init__(self, CF_dataset: implicit_CF_dataset, max_sequence_len):
+        super().__init__()
+        self.dataset = CF_dataset.dataset
+        self.train_dict = deepcopy(CF_dataset.train_dict)
+        self.num_users = CF_dataset.num_users
+        self.num_items = CF_dataset.num_items
+        self.num_seqs = len(CF_dataset.train_dict)
+        self.max_sequence_len = max_sequence_len
+        self.all_item_ids = torch.arange(1, self.num_items + 1, dtype=torch.long)
+        self.seq_mat = torch.zeros((self.num_users, self.max_sequence_len), dtype=torch.long)
+
+        for uid in self.train_dict:     # item ID start from 1 in SR
+            self.train_dict[uid] += 1
+        
+        for uid, seq in self.train_dict.items():
+            seq_len = len(seq)
+            if seq_len < self.max_sequence_len:
+                seq = torch.concat([seq, torch.zeros(self.max_sequence_len - seq_len)])
+            else:
+                seq = seq[-self.max_sequence_len:]
+            self.seq_mat[uid] = seq
+
+    def __len__(self):
+        return self.num_seqs
+    
+    def __getitem__(self, idx):
+        return self.seq_mat[idx]
+
+
 #################################################################################################################
 # For test
 #################################################################################################################
 
 class implicit_CF_dataset_test(data.Dataset):
-    def __init__(self, num_users, num_items, inter_dict):
+    def __init__(self, num_users, num_items, inter_dict, bias=0):
         """
         Parameters
         ----------
@@ -172,15 +203,24 @@ class implicit_CF_dataset_test(data.Dataset):
             num. items
         inter_dict: dict
             user as keys, valid/test item as values
+        bias: int
+            start of item IDs, default 0
         """
         super(implicit_CF_dataset_test, self).__init__()
-
+        self.bias = bias
         self.user_num = num_users
         self.item_num = num_items
         self.user_list = torch.LongTensor([i for i in range(num_users)])
 
-        self.inter_dict = inter_dict
+        self.inter_dict = deepcopy(inter_dict)
 
+    def set_bias(self, bias):
+        """
+        Set the start of item id in inter_dict as 'bias'. Useful in SR setting.
+        """
+        for uid in self.inter_dict:
+            self.inter_dict[uid] += bias - self.bias
+        self.bias = bias
 
 
 #################################################################################################################
