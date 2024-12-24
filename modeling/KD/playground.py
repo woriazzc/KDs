@@ -1,5 +1,4 @@
 import os
-import gc
 import math
 import mlflow
 import random
@@ -1269,23 +1268,7 @@ class MKD(BaseKD4Rec):
         self.L = args.mkd_L
         self.mxK = args.mkd_mxK
         self.sample_rank = args.sample_rank
-        self.preload = args.preload
-        if self.preload:
-            self.T_logit_all = self.teacher.get_all_ratings()
-            if self.teacher.model_type != self.student.model_type:
-                if self.teacher.model_type == "sr":
-                    self.T_logit_all = self.T_logit_all[:, 1:]
-                else:
-                    score_for_zero = torch.ones((self.T_logit_all.shape[0], 1), dtype=self.T_logit_all.dtype, device=self.T_logit_all.device) * -1e10
-                    self.T_logit_all = torch.cat([score_for_zero, self.T_logit_all], dim=1)   # num_users, 1 + num_items
-            del self.teacher
-            gc.collect()
-            torch.cuda.empty_cache()
-            _, self.T_topk_dict = torch.topk(self.T_logit_all, self.K, dim=-1)
-            self.T_topk_dict = self.T_topk_dict.long().cuda()
-        else:
-            self.T_topk_dict = self.get_topk_dict(self.teacher, self.K)
-
+        self.T_topk_dict = self.get_topk_dict(self.teacher, self.K)
         if self.sample_rank:
             ranking_list = torch.exp(-(torch.arange(self.mxK) + 1) / self.T)
             self.ranking_mat = ranking_list.repeat(self.num_users, 1)
@@ -1296,7 +1279,7 @@ class MKD(BaseKD4Rec):
             inter_mat = model.get_all_ratings()
             _, topk_dict = torch.topk(inter_mat, mxK, dim=-1)
         return topk_dict.type(torch.LongTensor).cuda()
-    
+
     # https://discuss.pytorch.org/t/find-indexes-of-elements-from-one-tensor-that-matches-in-another-tensor/147482/3
     def rowwise_index(self, source, target):
         idx = (target.unsqueeze(1) == source.unsqueeze(2)).nonzero()
@@ -1320,13 +1303,13 @@ class MKD(BaseKD4Rec):
                 self.interesting_items[user] = S_topk_dict[user][samples[user]]
             self.interesting_items = self.interesting_items.cuda()
             self.itemS = S_topk_dict[:, :self.K]
-    
+
     # https://stackoverflow.com/questions/74946537/can-i-apply-torch-isin-to-each-row-in-2d-tensor-without-loop
     def rowwise_isin(self, tensor_1, target_tensor):
         matches = (tensor_1.unsqueeze(2) == target_tensor.unsqueeze(1))
         result = torch.sum(matches, dim=2, dtype=torch.bool)
         return result
-    
+
     def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
         itemS = self.itemS[batch_users]
         itemT = self.T_topk_dict[batch_users]
@@ -1334,20 +1317,15 @@ class MKD(BaseKD4Rec):
         logit_S_itemS = self.student.forward_multi_items(batch_users, itemS) / self.tau
         logit_S_itemT = self.student.forward_multi_items(batch_users, itemT) / self.tau
         logit_S_interesting = self.student.forward_multi_items(batch_users, item_interesting) / self.tau
-        if self.preload:
-            logit_T_itemS = self.T_logit_all[batch_users.unsqueeze(1), itemS] / self.tau
-            logit_T_itemT = self.T_logit_all[batch_users.unsqueeze(1), itemT] / self.tau
-            logit_T_interesting = self.T_logit_all[batch_users.unsqueeze(1), item_interesting] / self.tau
-        else:
-            logit_T_itemS = self.teacher.forward_multi_items(batch_users, itemS) / self.tau
-            logit_T_itemT = self.teacher.forward_multi_items(batch_users, itemT) / self.tau
-            logit_T_interesting = self.teacher.forward_multi_items(batch_users, item_interesting) / self.tau
+        logit_T_itemS = self.teacher.forward_multi_items(batch_users, itemS) / self.tau
+        logit_T_itemT = self.teacher.forward_multi_items(batch_users, itemT) / self.tau
 
         exp_logit_T_itemS = torch.exp(logit_T_itemS)
         Z_T = exp_logit_T_itemS.sum(-1, keepdim=True)
         prob_T_itemS = exp_logit_T_itemS / Z_T
         loss_itemS = F.cross_entropy(logit_S_itemS, prob_T_itemS, reduction='none')
 
+        logit_T_interesting = self.teacher.forward_multi_items(batch_users, item_interesting) / self.tau
         exp_logit_T_interesting = torch.exp(logit_T_interesting)
         exp_logit_T_itemT = torch.exp(logit_T_itemT)
         mask = self.rowwise_isin(itemT, item_interesting)

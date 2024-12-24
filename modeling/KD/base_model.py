@@ -50,12 +50,17 @@ class BaseKD(nn.Module):
     @property
     def param_to_save(self):
         return self.student.state_dict()
+    
+    @property
+    def score_mat_to_save(self):
+        with torch.no_grad():
+            return self.student.score_mat().cpu()
 
 
 class BaseKD4Rec(BaseKD):
     def __init__(self, args, teacher, student, frozen_teacher=True):
         super().__init__(args, teacher, student, frozen_teacher)
-        self.dataset = self.teacher.dataset
+        self.dataset = self.student.dataset
         self.num_users = self.dataset.num_users
         self.num_items = self.dataset.num_items
 

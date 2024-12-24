@@ -58,6 +58,11 @@ class Scratch(nn.Module):
     @property
     def param_to_save(self):
         return self.backbone.state_dict()
+    
+    @property
+    def score_mat_to_save(self):
+        with torch.no_grad():
+            return self.backbone.score_mat().cpu()
 
 
 class KD(BaseKD4Rec):

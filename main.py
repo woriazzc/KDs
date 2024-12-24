@@ -30,7 +30,7 @@ def main(args):
                                        student_args.max_sequence_len)
         validset.set_bias(1)
         testset.set_bias(1)
-    if args.T_backbone.lower() in ["hstu"]:
+    if args.T_backbone.lower() in ["hstu"] and not args.preload:
         trainset_T = implicit_SR_dataset(implicit_CF_dataset(args.dataset, num_users, num_items, train_pairs, train_matrix, train_dict, user_pop, item_pop, args.num_ns, args.neg_sampling_on_all, no_neg_sampling), 
                                          teacher_args.max_sequence_len)
         validset_T = implicit_CF_dataset_test(num_users, num_items, valid_dict)
@@ -50,7 +50,10 @@ def main(args):
         all_teacher_args, all_student_args = deepcopy(args), deepcopy(args)
         all_teacher_args.__dict__.update(teacher_args.__dict__)
         all_student_args.__dict__.update(student_args.__dict__)
-        Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.T_backbone.lower())])(trainset_T, all_teacher_args).cuda()
+        if args.preload:
+            Teacher = backbone.Prediction(trainset_T, all_teacher_args).cuda()
+        else:
+            Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.T_backbone.lower())])(trainset_T, all_teacher_args).cuda()
         Student = getattr(backbone, dir(backbone)[all_backbones.index(args.S_backbone.lower())])(trainset, all_student_args).cuda()
     else:
         logger.log(f'Invalid backbone {args.S_backbone}.')
@@ -62,7 +65,9 @@ def main(args):
         else:
             model = KD.Scratch(args, Student).cuda()
     else:
-        T_path = os.path.join("checkpoints", args.dataset, args.T_backbone, f"scratch-{teacher_args.embedding_dim}", "BEST_EPOCH.pt")
+        T_path = os.path.join("checkpoints", args.dataset, args.T_backbone, f"scratch-{teacher_args.embedding_dim}")
+        if args.preload: T_path = os.path.join(T_path, "BEST_SCORE_MAT.pt")
+        else: T_path = os.path.join(T_path, "BEST_EPOCH.pt")
         Teacher.load_state_dict(torch.load(T_path, weights_only=True))
         all_models = [e.lower() for e in dir(KD)]
         if args.model.lower() in all_models:
@@ -79,8 +84,12 @@ def main(args):
 
     # Evaluator
     evaluator = Evaluator(args)
-    best_model, best_epoch = deepcopy(model.param_to_save), -1
-    ckpts = []
+    if not args.no_save:
+        best_model, best_epoch = deepcopy(model.param_to_save), -1
+        ckpts = []
+        if args.postsave:
+            best_score_mat = deepcopy(model.score_mat_to_save)
+            score_mats = []
 
     # Test Teacher first
     if args.model.lower() != "scratch":
@@ -140,13 +149,16 @@ def main(args):
             evaluator.print_result_while_training(logger, epoch_loss, epoch_base_loss, epoch_kd_loss, eval_results, is_improved=is_improved, train_time=toc1-tic1, test_time=elapsed)
             if early_stop:
                 break
-            if is_improved:
+            if not args.no_save and is_improved:
                 best_model = deepcopy(model.param_to_save)
                 best_epoch = epoch
+                if args.postsave:
+                    best_score_mat = deepcopy(model.score_mat_to_save)
         
         # save intermediate checkpoints
         if not args.no_save and args.ckpt_interval != -1 and epoch % args.ckpt_interval == 0 and epoch != 0:
             ckpts.append(deepcopy(model.param_to_save))
+            score_mats.append(deepcopy(model.score_mat_to_save))
     
     eval_dict = evaluator.eval_dict
     Evaluator.print_final_result(logger, eval_dict)
@@ -155,10 +167,13 @@ def main(args):
         save_dir = os.path.join("checkpoints", args.dataset, args.S_backbone, f"{args.model.lower()}-{embedding_dim}" + ('_' if args.suffix != '' else '') + args.suffix)
         os.makedirs(save_dir, exist_ok=True)
         torch.save(best_model, os.path.join(save_dir, "BEST_EPOCH.pt"))
-        for idx, ckpt in enumerate(ckpts):
+        if args.postsave:
+            torch.save(best_score_mat, os.path.join(save_dir, "BEST_SCORE_MAT.pt"))
+        for idx in range(len(ckpts)):
             if (idx + 1) * args.ckpt_interval >= best_epoch:
                 break
-            torch.save(ckpt, os.path.join(save_dir, f"EPOCH_{(idx + 1) * args.ckpt_interval}.pt"))
+            torch.save(ckpts[idx], os.path.join(save_dir, f"EPOCH_{(idx + 1) * args.ckpt_interval}.pt"))
+            torch.save(score_mats[idx], os.path.join(save_dir, f"EPOCH_{(idx + 1) * args.ckpt_interval}_SCORE_MAT.pt"))
 
     return eval_dict
 

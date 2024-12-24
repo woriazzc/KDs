@@ -69,6 +69,9 @@ class BaseCF(nn.Module):
         pos_score = pos_score.expand_as(neg_score)  # batch_size, num_ns
         loss = -F.logsigmoid(pos_score - neg_score).mean(1).sum()
         return loss
+    
+    def score_mat(self):
+        return self.get_all_ratings()
 
 
 class BaseSR(nn.Module):
@@ -106,6 +109,9 @@ class BaseSR(nn.Module):
         raise NotImplementedError
     
     def get_all_ratings(self):
+        """
+        get score mat including all users and item 0
+        """
         batch_size = 1024
         num_batch = math.ceil(self.num_users / batch_size)
         all_scores = []
@@ -114,7 +120,15 @@ class BaseSR(nn.Module):
             all_scores.append(self.get_ratings(batch_user))
         all_scores = torch.cat(all_scores, dim=0)
         return all_scores
-
+    
+    def score_mat(self):
+        """
+        remove item 0
+        """
+        score_mat_with_zero = self.get_all_ratings()
+        score_mat = score_mat_with_zero[:, 1:]
+        return score_mat
+    
 
 class BaseGCN(BaseCF):
     def __init__(self, dataset, args):
