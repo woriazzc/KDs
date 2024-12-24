@@ -26,11 +26,13 @@ def main(args):
     validset = implicit_CF_dataset_test(num_users, num_items, valid_dict)
     testset = implicit_CF_dataset_test(num_users, num_items, test_dict)
     if args.S_backbone.lower() in ["hstu"]:
-        trainset = implicit_SR_dataset(trainset, student_args.max_sequence_len)
+        trainset = implicit_SR_dataset(implicit_CF_dataset(args.dataset, num_users, num_items, train_pairs, train_matrix, train_dict, user_pop, item_pop, args.num_ns, args.neg_sampling_on_all, no_neg_sampling), 
+                                       student_args.max_sequence_len)
         validset.set_bias(1)
         testset.set_bias(1)
     if args.T_backbone.lower() in ["hstu"]:
-        trainset_T = implicit_SR_dataset(trainset, teacher_args.max_sequence_len)
+        trainset_T = implicit_SR_dataset(implicit_CF_dataset(args.dataset, num_users, num_items, train_pairs, train_matrix, train_dict, user_pop, item_pop, args.num_ns, args.neg_sampling_on_all, no_neg_sampling), 
+                                         teacher_args.max_sequence_len)
         validset_T = implicit_CF_dataset_test(num_users, num_items, valid_dict)
         testset_T = implicit_CF_dataset_test(num_users, num_items, test_dict)
         validset_T.set_bias(1)
@@ -110,13 +112,12 @@ def main(args):
             # Forward Pass
             model.train()
             try:
-                data = data.cuda()
-                loss, base_loss, kd_loss = model(data)
+                data = [data.cuda()]
             except:
                 for i in range(len(data)):
                     try: data[i] = data[i].cuda()
                     except: pass
-                loss, base_loss, kd_loss = model(*data)
+            loss, base_loss, kd_loss = model(*data)
 
             # Backward and optimize
             optimizer.zero_grad()
@@ -133,15 +134,15 @@ def main(args):
         toc1 = time.time()
         
         # evaluation
-        # if epoch % args.eval_period == 0:
-        #     logger.log("Evaluating...")
-        #     is_improved, early_stop, eval_results, elapsed = evaluator.evaluate_while_training(model, epoch, train_loader, validset, testset)
-        #     evaluator.print_result_while_training(logger, epoch_loss, epoch_base_loss, epoch_kd_loss, eval_results, is_improved=is_improved, train_time=toc1-tic1, test_time=elapsed)
-        #     if early_stop:
-        #         break
-        #     if is_improved:
-        #         best_model = deepcopy(model.param_to_save)
-        #         best_epoch = epoch
+        if epoch % args.eval_period == 0:
+            logger.log("Evaluating...")
+            is_improved, early_stop, eval_results, elapsed = evaluator.evaluate_while_training(model, epoch, train_loader, validset, testset)
+            evaluator.print_result_while_training(logger, epoch_loss, epoch_base_loss, epoch_kd_loss, eval_results, is_improved=is_improved, train_time=toc1-tic1, test_time=elapsed)
+            if early_stop:
+                break
+            if is_improved:
+                best_model = deepcopy(model.param_to_save)
+                best_epoch = epoch
         
         # save intermediate checkpoints
         if not args.no_save and args.ckpt_interval != -1 and epoch % args.ckpt_interval == 0 and epoch != 0:
