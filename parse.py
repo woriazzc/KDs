@@ -32,6 +32,8 @@ parser.add_argument('--neg_sampling_on_all', action='store_true')
 parser.add_argument('--T_backbone', type=str, default='bpr')
 parser.add_argument('--S_backbone', type=str, default='bpr')
 parser.add_argument('--model', type=str, default='rrd')
+parser.add_argument("--preload", action="store_true")
+parser.add_argument("--postsave", action="store_true")
 
 parser.add_argument('--train_teacher', action='store_true')
 parser.add_argument('--ckpt_interval', type=int, default=-1, help="number of interval epochs to store teacher's checkpoints, -1 for only save the best_epoch")

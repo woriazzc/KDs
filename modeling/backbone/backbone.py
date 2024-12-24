@@ -15,6 +15,28 @@ from .hstu_base_module import (DotProductSimilarity, RelativeBucketedTimeAndPosi
 """
 Recommendation Models
 """
+
+class Prediction(nn.Module):
+    def __init__(self, dataset, args):
+        super().__init__()
+        self.model_type = "preload"
+        self.model_name = "preload"
+        self.score_mat = torch.zeros((dataset.num_users, dataset.num_items)).cuda()
+    
+    def load_state_dict(self, score_mat: torch.Tensor):
+        assert score_mat.shape == self.score_mat.shape
+        self.score_mat = score_mat.cuda()
+
+    def get_all_ratings(self):
+        return self.score_mat
+    
+    def get_ratings(self, batch_user):
+        return self.score_mat[batch_user]
+    
+    def forward_multi_items(self, batch_user, batch_items):
+        return self.score_mat[batch_user.unsqueeze(-1), batch_items]
+
+
 class BPR(BaseCF):
     def __init__(self, dataset, args):
         super(BPR, self).__init__(dataset, args)
