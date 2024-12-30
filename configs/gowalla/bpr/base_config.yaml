@@ -11,7 +11,7 @@ teacher:
     num_layers: 4
   hstu:
     max_sequence_len: 100
-    embedding_dim: 64
+    embedding_dim: 32
     num_blocks: 8
     num_heads: 4
     attention_dim: 16
@@ -23,7 +23,7 @@ teacher:
     concat_ua: False
     normalization: rel_bias
     max_output_len: 10
-    num_negatives: 512
+    num_negatives: 1024
     dropout_rate: 0.5
     temperature: 0.05
 student:

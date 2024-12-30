@@ -1,10 +1,10 @@
 teacher:
   hstu:
     max_sequence_len: 100
-    embedding_dim: 32
+    embedding_dim: 64
     num_blocks: 8
     num_heads: 4
-    attention_dim: 16
+    attention_dim: 8
     linear_dim: 16
     linear_activation: silu
     linear_dropout_rate: 0.5
@@ -13,15 +13,15 @@ teacher:
     concat_ua: False
     normalization: rel_bias
     max_output_len: 10
-    num_negatives: 1024
+    num_negatives: 512
     dropout_rate: 0.5
     temperature: 0.05
 student:
   max_sequence_len: 100
-  embedding_dim: 32
+  embedding_dim: 64
   num_blocks: 1
-  num_heads: 1
-  attention_dim: 16
+  num_heads: 2
+  attention_dim: 8
   linear_dim: 16
   linear_activation: silu
   linear_dropout_rate: 0.5
@@ -30,6 +30,6 @@ student:
   concat_ua: False
   normalization: rel_bias
   max_output_len: 10
-  num_negatives: 1024
+  num_negatives: 512
   dropout_rate: 0.5
   temperature: 0.05

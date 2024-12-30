@@ -3,15 +3,14 @@ bpr:
   batch_size: 2048
   lr: 1.e-3
   wd: 1.e-5
-  lmbda: 5
+  lmbda: 500
   mkd_tau: 1
   mkd_K: 50
   mkd_L: 50
   mkd_T: 10
-  mkd_mxK: 100
-  mkd_beta: 5
+  mkd_mxK: 200
+  mkd_beta: 3
   sample_rank: False
-  mkd_T2: 100
 lightgcn:
   epochs: 1000
   batch_size: 2048
@@ -25,7 +24,7 @@ lightgcn:
   mkd_mxK: 200
   mkd_beta: 5
   sample_rank: False
-simplex:
+hstu:
   epochs: 1000
   batch_size: 2048
   lr: 1.e-3
@@ -37,15 +36,4 @@ simplex:
   mkd_T: 10
   mkd_mxK: 100
   mkd_beta: 5
-xsimgcl:
-  epochs: 1000
-  batch_size: 2048
-  lr: 1.e-3
-  wd: 1.e-7
-  lmbda: 5
-  mkd_tau: 1
-  mkd_K: 50
-  mkd_L: 50
-  mkd_T: 10
-  mkd_mxK: 100
-  mkd_beta: 5
+  sample_rank: False

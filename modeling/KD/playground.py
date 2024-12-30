@@ -1264,7 +1264,6 @@ class MKD(BaseKD4Rec):
         self.K = args.mkd_K
         self.beta = args.mkd_beta
         self.T = args.mkd_T
-        self.T2 = args.mkd_T2
         self.L = args.mkd_L
         self.mxK = args.mkd_mxK
         self.sample_rank = args.sample_rank
@@ -1339,11 +1338,6 @@ class MKD(BaseKD4Rec):
         exp_logit_S_interesting = torch.exp(logit_S_interesting)
         Z_S = exp_logit_S_interesting.sum(-1, keepdim=True) + exp_logit_S_itemT.sum(-1, keepdim=True)
         logit_S_all = torch.cat([logit_S_interesting, logit_S_itemT], dim=-1)
-        if self.sample_rank:
-            decay_weight = torch.ones_like(prob_T_all)
-            ranking_list = torch.exp(-(torch.arange(self.K) + 1) / self.T2)
-            decay_weight[:, item_interesting.shape[-1]:] = ranking_list.repeat(len(prob_T_all), 1)
-            prob_T_all = prob_T_all * decay_weight
         loss_itemT = -(prob_T_all * (logit_S_all - torch.log(Z_S))).sum(-1)
 
         overlap = mask.float().mean(-1)

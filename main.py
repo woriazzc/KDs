@@ -21,13 +21,14 @@ from utils import seed_all, avg_dict, Logger
 def main(args):
     # Dataset
     num_users, num_items, train_pairs, valid_pairs, test_pairs, train_dict, valid_dict, test_dict, train_matrix, user_pop, item_pop = load_cf_data(args.dataset)
-    no_neg_sampling = getattr(student_args, "no_neg_sampling", False)
+    no_neg_sampling = getattr(teacher_args, "no_neg_sampling", False) if args.train_teacher else getattr(student_args, "no_neg_sampling", False)
     trainset = implicit_CF_dataset(args.dataset, num_users, num_items, train_pairs, train_matrix, train_dict, user_pop, item_pop, args.num_ns, args.neg_sampling_on_all, no_neg_sampling)
     validset = implicit_CF_dataset_test(num_users, num_items, valid_dict)
     testset = implicit_CF_dataset_test(num_users, num_items, test_dict)
     if args.S_backbone.lower() in ["hstu"]:
+        max_sequence_len = teacher_args.max_sequence_len if args.train_teacher else student_args.max_sequence_len
         trainset = implicit_SR_dataset(implicit_CF_dataset(args.dataset, num_users, num_items, train_pairs, train_matrix, train_dict, user_pop, item_pop, args.num_ns, args.neg_sampling_on_all, no_neg_sampling), 
-                                       student_args.max_sequence_len)
+                                       max_sequence_len)
         validset.set_bias(1)
         testset.set_bias(1)
     if args.T_backbone.lower() in ["hstu"] and not args.preload:

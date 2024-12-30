@@ -19,6 +19,23 @@ teacher:
     simplex_max_len: 500
     simplex_negative_weight: 100
     simplex_enable_bias: False
+  hstu:
+    max_sequence_len: 100
+    embedding_dim: 64
+    num_blocks: 8
+    num_heads: 4
+    attention_dim: 8
+    linear_dim: 16
+    linear_activation: silu
+    linear_dropout_rate: 0.5
+    attn_dropout_rate: 0.
+    enable_relative_attention_bias: True
+    concat_ua: False
+    normalization: rel_bias
+    max_output_len: 10
+    num_negatives: 512
+    dropout_rate: 0.5
+    temperature: 0.05
 student:
   init_std: 1.e-2
   embedding_dim: 20
