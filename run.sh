@@ -6,21 +6,21 @@ python -u main.py --dataset=foursquare --S_backbone=bpr --train_teacher --teache
 python -u main.py --dataset=foursquare --S_backbone=lightgcn --train_teacher --teacher embedding_dim=2000 num_layers=1 --cfg wd=1e-3 --suffix teacher
 
 python -u main.py --dataset=citeulike --S_backbone=bpr --train_teacher --teacher embedding_dim=400 --cfg wd=1e-3 --suffix teacher
-python -u main.py --dataset=citeulike --S_backbone=lightgcn --train_teacher --teacher embedding_dim=2000 num_layers=3 --cfg wd=1e-7 --suffix teacher
+python -u main.py --dataset=citeulike --S_backbone=lightgcn --train_teacher --suffix teacher --postsave
 python -u main.py --dataset=citeulike --S_backbone=simplex --train_teacher --teacher embedding_dim=500 --cfg wd=1e-5 num_ns=2000 --suffix teacher
 python -u main.py --dataset=citeulike --S_backbone=xsimgcl --train_teacher --suffix teacher
 python -u main.py --dataset=citeulike --S_backbone=sccf --train_teacher --suffix teacher
-python -u main.py --dataset=citeulike --S_backbone=hstu --train_teacher --suffix teacher
+python -u main.py --dataset=citeulike --S_backbone=hstu --train_teacher --suffix teacher --postsave
 
 python -u main.py --dataset=gowalla --S_backbone=bpr --train_teacher --teacher embedding_dim=300 --cfg wd=1e-4 --suffix teacher
-python -u main.py --dataset=gowalla --S_backbone=lightgcn --train_teacher --teacher embedding_dim=2000 num_layers=4 --cfg wd=1e-6 --suffix teacher
+python -u main.py --dataset=gowalla --S_backbone=lightgcn --train_teacher --suffix teacher --postsave
 python -u main.py --dataset=gowalla --S_backbone=simplex --train_teacher --teacher embedding_dim=1000 --cfg wd=1e-8 num_ns=2000 --suffix teacher
-python -u main.py --dataset=gowalla --S_backbone=hstu --train_teacher --suffix teacher
+python -u main.py --dataset=gowalla --S_backbone=hstu --train_teacher --suffix teacher --postsave
 
 python -u main.py --dataset=yelp --S_backbone=bpr --train_teacher --suffix teacher --teacher embedding_dim=300 --cfg wd=1e-4 --suffix teacher
-python -u main.py --dataset=yelp --S_backbone=lightgcn --train_teacher --teacher embedding_dim=1000 num_layers=3 --cfg wd=1e-7 --suffix teacher
+python -u main.py --dataset=yelp --S_backbone=lightgcn --train_teacher --suffix teacher --postsave
 python -u main.py --dataset=yelp --S_backbone=simplex --train_teacher --teacher embedding_dim=500 --cfg wd=1e-8 num_ns=1000 --suffix teacher
-python -u main.py --dataset=yelp --S_backbone=hstu --train_teacher --suffix teacher
+python -u main.py --dataset=yelp --S_backbone=hstu --train_teacher --suffix teacher --postsave
 
 # from scratch
 python -u main.py --dataset=foursquare --S_backbone=bpr --model=scratch --student embedding_dim=10 --cfg wd=0.01 --suffix student
