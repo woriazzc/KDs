@@ -167,6 +167,7 @@ class implicit_SR_dataset(data.Dataset):
         self.num_items = CF_dataset.num_items
         self.num_seqs = len(CF_dataset.train_dict)
         self.max_sequence_len = max_sequence_len
+        self.all_user_ids = torch.arange(0, self.num_users, dtype=torch.long)
         self.all_item_ids = torch.arange(1, self.num_items + 1, dtype=torch.long)
         self.seq_mat = torch.zeros((self.num_users, self.max_sequence_len), dtype=torch.long)
 
@@ -185,7 +186,7 @@ class implicit_SR_dataset(data.Dataset):
         return self.num_seqs
     
     def __getitem__(self, idx):
-        return self.seq_mat[idx]
+        return self.all_user_ids[idx], self.seq_mat[idx]
 
 
 #################################################################################################################

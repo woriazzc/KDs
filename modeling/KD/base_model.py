@@ -68,10 +68,10 @@ class BaseKD4Rec(BaseKD):
         self.num_users = self.dataset.num_users
         self.num_items = self.dataset.num_items
 
-    def forward(self, batch_user, batch_pos_item, batch_neg_item):
-        output = self.student(batch_user, batch_pos_item, batch_neg_item)
+    def forward(self, *params):
+        output = self.student(*params)
         base_loss = self.student.get_loss(output)
-        kd_loss = self.get_loss(batch_user, batch_pos_item, batch_neg_item)
+        kd_loss = self.get_loss(*params)
         loss = base_loss + self.lmbda * kd_loss
         return loss, base_loss.detach(), kd_loss.detach()
     

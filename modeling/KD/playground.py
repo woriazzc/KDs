@@ -1309,7 +1309,8 @@ class MKD(BaseKD4Rec):
         result = torch.sum(matches, dim=2, dtype=torch.bool)
         return result
 
-    def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
+    def get_loss(self, *params):
+        batch_users = params[0]
         itemS = self.itemS[batch_users]
         itemT = self.T_topk_dict[batch_users]
         item_interesting = self.interesting_items[batch_users]
