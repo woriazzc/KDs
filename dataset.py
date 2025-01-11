@@ -193,7 +193,7 @@ class implicit_SR_dataset(data.Dataset):
 #################################################################################################################
 
 class implicit_CF_dataset_test(data.Dataset):
-    def __init__(self, num_users, num_items, inter_dict, bias=0):
+    def __init__(self, num_users, num_items, inter_dict):
         """
         Parameters
         ----------
@@ -203,11 +203,8 @@ class implicit_CF_dataset_test(data.Dataset):
             num. items
         inter_dict: dict
             user as keys, valid/test item as values
-        bias: int
-            start of item IDs, default 0
         """
         super(implicit_CF_dataset_test, self).__init__()
-        self.bias = bias
         self.user_num = num_users
         self.item_num = num_items
         self.user_list = torch.LongTensor([i for i in range(num_users)])
