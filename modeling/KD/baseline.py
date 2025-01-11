@@ -64,7 +64,7 @@ class Scratch(nn.Module):
         with torch.no_grad():
             training = self.backbone.training
             self.backbone.eval()
-            score_mat = self.backbone.score_mat().cpu()
+            score_mat = self.backbone.get_all_ratings().cpu()
             self.backbone.train(training)
             return score_mat
 
@@ -436,7 +436,8 @@ class RRD(BaseKD4Rec):
         
         return -(above - below).sum()
 
-    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+    def get_loss(self, *params):
+        batch_user = params[0]
         users = batch_user.unique()
         interesting_items, uninteresting_items = self.get_samples(users)
         interesting_items = interesting_items.type(torch.LongTensor).cuda()

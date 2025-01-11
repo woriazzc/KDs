@@ -72,8 +72,6 @@ class Evaluator:
         test_dict = test_dataset.inter_dict
         num_users = train_loader.dataset.num_users
         num_items = train_loader.dataset.num_items
-        if isinstance(train_loader.dataset, implicit_SR_dataset):
-            num_items += 1  # include 0
 
         model.eval()
         test_loader = data.DataLoader(list(test_dict.keys()), batch_size=max(train_loader.batch_size, 1024))

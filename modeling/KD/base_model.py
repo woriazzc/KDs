@@ -56,7 +56,7 @@ class BaseKD(nn.Module):
         with torch.no_grad():
             training = self.student.training
             self.student.eval()
-            score_mat = self.student.score_mat().cpu()
+            score_mat = self.student.get_all_ratings().cpu()
             self.student.train(training)
             return score_mat
 

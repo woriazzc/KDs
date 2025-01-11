@@ -29,15 +29,11 @@ def main(args):
         max_sequence_len = teacher_args.max_sequence_len if args.train_teacher else student_args.max_sequence_len
         trainset = implicit_SR_dataset(implicit_CF_dataset(args.dataset, num_users, num_items, train_pairs, train_matrix, train_dict, user_pop, item_pop, args.num_ns, args.neg_sampling_on_all, no_neg_sampling), 
                                        max_sequence_len)
-        validset.set_bias(1)
-        testset.set_bias(1)
     if args.T_backbone.lower() in ["hstu"] and not args.preload:
         trainset_T = implicit_SR_dataset(implicit_CF_dataset(args.dataset, num_users, num_items, train_pairs, train_matrix, train_dict, user_pop, item_pop, args.num_ns, args.neg_sampling_on_all, no_neg_sampling), 
                                          teacher_args.max_sequence_len)
         validset_T = implicit_CF_dataset_test(num_users, num_items, valid_dict)
         testset_T = implicit_CF_dataset_test(num_users, num_items, test_dict)
-        validset_T.set_bias(1)
-        testset_T.set_bias(1)
     else:
         trainset_T = implicit_CF_dataset(args.dataset, num_users, num_items, train_pairs, train_matrix, train_dict, user_pop, item_pop, args.num_ns, args.neg_sampling_on_all, no_neg_sampling)
         validset_T = implicit_CF_dataset_test(num_users, num_items, valid_dict)

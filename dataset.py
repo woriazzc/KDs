@@ -170,12 +170,11 @@ class implicit_SR_dataset(data.Dataset):
         self.all_user_ids = torch.arange(0, self.num_users, dtype=torch.long)
         self.all_item_ids = torch.arange(1, self.num_items + 1, dtype=torch.long)
         self.seq_mat = torch.zeros((self.num_users, self.max_sequence_len), dtype=torch.long)
-
-        for uid in self.train_dict:     # item ID start from 1 in SR
-            self.train_dict[uid] += 1
+        self.train_pairs = CF_dataset.train_pairs
         
         for uid, seq in self.train_dict.items():
             seq_len = len(seq)
+            seq = seq + 1   # item IDs start from 1
             if seq_len < self.max_sequence_len:
                 seq = torch.concat([seq, torch.zeros(self.max_sequence_len - seq_len)])
             else:
@@ -214,14 +213,6 @@ class implicit_CF_dataset_test(data.Dataset):
         self.user_list = torch.LongTensor([i for i in range(num_users)])
 
         self.inter_dict = deepcopy(inter_dict)
-
-    def set_bias(self, bias):
-        """
-        Set the start of item id in inter_dict as 'bias'. Useful in SR setting.
-        """
-        for uid in self.inter_dict:
-            self.inter_dict[uid] += bias - self.bias
-        self.bias = bias
 
 
 #################################################################################################################
