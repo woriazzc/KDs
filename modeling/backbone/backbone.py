@@ -21,20 +21,20 @@ class Prediction(nn.Module):
         super().__init__()
         self.model_type = "preload"
         self.model_name = "preload"
-        self.score_mat = torch.zeros((dataset.num_users, dataset.num_items)).cuda()
+        self.score_mat = torch.zeros((dataset.num_users, dataset.num_items))
     
     def load_state_dict(self, score_mat: torch.Tensor):
         assert score_mat.shape == self.score_mat.shape
-        self.score_mat = score_mat.cuda()
+        self.score_mat = score_mat
 
     def get_all_ratings(self):
-        return self.score_mat
+        return self.score_mat.cuda()
     
     def get_ratings(self, batch_user):
-        return self.score_mat[batch_user]
+        return self.score_mat[batch_user.cpu()].cuda()
     
     def forward_multi_items(self, batch_user, batch_items):
-        return self.score_mat[batch_user.unsqueeze(-1), batch_items]
+        return self.score_mat[batch_user.unsqueeze(-1).cpu(), batch_items.cpu()].cuda()
 
 
 class BPR(BaseCF):
@@ -908,8 +908,6 @@ class HSTU(BaseSR):
         )
         items = self._l2_norm(self.item_emb(self.item_list))
         score_mat = torch.matmul(shared_input_embeddings, items.T)
-        score_for_zero = torch.ones((score_mat.shape[0], 1), dtype=score_mat.dtype, device=score_mat.device) * -1e10
-        score_mat = torch.cat([score_for_zero, score_mat], dim=1)   # num_users, 1 + num_items
         return score_mat
     
     def forward_multi_items(self, batch_user, batch_items):
@@ -921,7 +919,8 @@ class HSTU(BaseSR):
             past_embeddings=self.item_emb(past_ids),
             past_payloads=None,
         )
-        items = self._l2_norm(self.item_emb(batch_items))
+        # change start value of item IDs to 1
+        items = self._l2_norm(self.item_emb(batch_items + 1))
         score_mat = torch.bmm(items, shared_input_embeddings.unsqueeze(-1)).squeeze(-1)
         return score_mat
 
