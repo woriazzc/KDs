@@ -14,11 +14,12 @@ hstu:
   epochs: 1000
   batch_size: 4096
   lr: 1.e-3
-  wd: 1.e-3
-  lmbda: 0.005
-  rrd_K: 100
-  rrd_L: 200
-  rrd_T: 100
-  rrd_mxK: 500
+  wd: 1.e-5
+  lmbda: 0.1
+  rrd_K: 200
+  rrd_L: 100
+  rrd_T: 10
+  rrd_mxK: 200
   sample_from_score: False
   no_sort: False
+  preload: True

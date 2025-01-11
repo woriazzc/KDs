@@ -1,6 +1,6 @@
 bpr:
   epochs: 1000
-  batch_size: 2048
+  batch_size: 128
   lr: 1.e-3
   wd: 1.e-5
   lmbda: 10
@@ -15,7 +15,7 @@ bpr:
   preload: False
 lightgcn:
   epochs: 1000
-  batch_size: 2048
+  batch_size: 128
   lr: 1.e-3
   wd: 1.e-5
   lmbda: 10
@@ -28,42 +28,18 @@ lightgcn:
   sample_rank: False
   mkd_T2: 100
   preload: False
-simplex:
-  epochs: 1000
-  batch_size: 2048
-  lr: 1.e-3
-  wd: 1.e-5
-  lmbda: 5
-  mkd_tau: 1
-  mkd_K: 50
-  mkd_L: 50
-  mkd_T: 10
-  mkd_mxK: 100
-  mkd_beta: 5
-xsimgcl:
-  epochs: 1000
-  batch_size: 2048
-  lr: 1.e-3
-  wd: 1.e-7
-  lmbda: 5
-  mkd_tau: 1
-  mkd_K: 50
-  mkd_L: 50
-  mkd_T: 10
-  mkd_mxK: 100
-  mkd_beta: 5
 hstu:
   epochs: 1000
-  batch_size: 2048
+  batch_size: 128
   lr: 1.e-3
   wd: 1.e-5
-  lmbda: 100000
+  lmbda: 5
   mkd_tau: 1
-  mkd_K: 100
+  mkd_K: 50
   mkd_L: 50
   mkd_T: 10
-  mkd_mxK: 200
-  mkd_beta: 1
+  mkd_mxK: 100
+  mkd_beta: 5
   sample_rank: False
   mkd_T2: 100
   preload: True
