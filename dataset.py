@@ -1,4 +1,5 @@
 import os
+import re
 import yaml
 import math
 import lmdb
@@ -6,6 +7,7 @@ import pickle
 import shutil
 import struct
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
 from copy import deepcopy
@@ -21,21 +23,32 @@ import torch.nn.functional as F
 DATA_DIR = 'data/'
 
 
-def load_pii_dict(file_path, start_idx):
-    ui_pairs = []
-    uis_dict = {}
-    
-    with open(file_path, 'r') as f:
-        for line in f:
-            u, i = line.strip().split()[:2]
-            u = int(u) - start_idx
-            i = int(i) - start_idx
-            ui_pairs.append([u, i])
-            if u not in uis_dict:
-                uis_dict[u] = []
-            uis_dict[u].append(i)
+def load_multimodal(dataset_name):
+    data_dir = os.path.join(DATA_DIR, dataset_name)
+    mm_dict = {}
+    for f_name in os.listdir(data_dir):
+        mm_name = re.match(r"(.+)_modality.pkl", f_name)
+        if mm_name is None: continue
+        mm_name = mm_name.group(1)
+        mm_data = pickle.load(open(os.path.join(data_dir, f_name), "rb"))
+        mm_dict[mm_name] = mm_data  # torch.Tensor, device=cpu, dtype=float32
+    return mm_dict
 
-    ui_pairs = torch.LongTensor(ui_pairs)
+
+def load_pii_dict(file_path, start_idx):
+    df = pd.read_csv(file_path, sep='\t', header=0)
+    users = df["USER"].to_numpy() - start_idx
+    items = df["ITEM"].to_numpy() - start_idx
+    ui_pairs = np.stack([users, items], axis=-1)
+    
+    uis_dict = {}
+    for pii in ui_pairs:
+        u, i = pii[0], pii[1]
+        if u not in uis_dict:
+            uis_dict[u] = []
+        uis_dict[u].append(i)
+    
+    ui_pairs = torch.from_numpy(ui_pairs).long()
     for u in uis_dict:
         uis_dict[u] = torch.LongTensor(uis_dict[u])
 

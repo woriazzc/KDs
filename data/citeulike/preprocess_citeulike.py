@@ -91,14 +91,14 @@ if __name__ == '__main__':
 
     # save
     df = pd.DataFrame(trainiter)
-    df.to_csv('train.txt', sep='\t', index=False, header=False)
+    df.to_csv('train.txt', sep='\t', index=False, header=["USER", "ITEM"])
     num_train_inter = len(df)
 
     df = pd.DataFrame(validiter)
-    df.to_csv('valid.txt', sep='\t', index=False, header=False)
+    df.to_csv('valid.txt', sep='\t', index=False, header=["USER", "ITEM"])
 
     df = pd.DataFrame(testiter)
-    df.to_csv('test.txt', sep='\t', index=False, header=False)
+    df.to_csv('test.txt', sep='\t', index=False, header=["USER", "ITEM"])
 
     from prettytable import PrettyTable
     table = PrettyTable(['#User', '#Item', '#Interactions', '#Train', '#Valid', '#Test', 'Density'])

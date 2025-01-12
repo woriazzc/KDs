@@ -9,6 +9,23 @@ teacher:
     dropout: False
     embedding_dim: 1000
     num_layers: 3
+  hstu:
+    max_sequence_len: 400
+    embedding_dim: 32
+    num_blocks: 8
+    num_heads: 8
+    attention_dim: 16
+    linear_dim: 16
+    linear_activation: silu
+    linear_dropout_rate: 0.7
+    attn_dropout_rate: 0.
+    enable_relative_attention_bias: True
+    concat_ua: False
+    normalization: rel_bias
+    max_output_len: 10
+    num_negatives: 2048
+    dropout_rate: 0.5
+    temperature: 0.1
 student:
   init_std: 1.e-2
   embedding_dim: 20

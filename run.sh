@@ -91,6 +91,14 @@ python -u main.py --dataset=yelp --S_backbone=bpr --T_backbone=bpr --model=rrd
 
 
 """
+For Multi-Modal Prediction Models
+"""
+# train teacher
+python -u main_mm.py --dataset=baby --S_backbone=bm3 --train_teacher --suffix teacher
+
+
+
+"""
 For CTR Prediction Models
 """
 # train teacher
