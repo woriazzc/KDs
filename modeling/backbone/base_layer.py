@@ -1,4 +1,9 @@
+import os
+import yaml
 import numpy as np
+import scipy.sparse as sp
+from scipy.sparse import csr_matrix
+from .utils import convert_sp_mat_to_sp_tensor, load_pkls, dump_pkls
 
 import torch
 import torch.nn as nn
@@ -255,3 +260,67 @@ class GateCrossLayer(nn.Module):
         xg = torch.sigmoid(self.wg(cross))    # Information Gate
         result = base * xw * xg + cross
         return result
+
+
+class BipartitleGraph(object):
+    def __init__(self, args, dataset):
+        self.graph = self.construct_graph(args, dataset)
+        
+    def construct_graph(self, args, dataset):
+        f_Graph = os.path.join("modeling", "backbone", "crafts", args.dataset, f"Graph.pkl")
+        sucflg, Graph = load_pkls(f_Graph)
+        if sucflg:
+            return Graph.cuda()
+        
+        config = yaml.load(open(os.path.join(args.DATA_DIR, args.dataset, 'config.yaml'), 'r'), Loader=yaml.FullLoader)
+        if "large" in config and config["large"] == True:
+            Graph = self._construct_large_graph(dataset)
+        else:
+            Graph = self._construct_small_graph(dataset)
+        dump_pkls((Graph, f_Graph))
+        return Graph.cuda()
+    
+    def _construct_small_graph(self, dataset):
+        user_dim = torch.LongTensor(dataset.train_pairs[:, 0].cpu())
+        item_dim = torch.LongTensor(dataset.train_pairs[:, 1].cpu())
+
+        first_sub = torch.stack([user_dim, item_dim + dataset.num_users])
+        second_sub = torch.stack([item_dim + dataset.num_users, user_dim])
+        index = torch.cat([first_sub, second_sub], dim=1)
+        data = torch.ones(index.size(-1)).int()
+        Graph = torch.sparse_coo_tensor(index, data,
+                                            torch.Size([dataset.num_users + dataset.num_items, dataset.num_users + dataset.num_items]), dtype=torch.int)
+        dense = Graph.to_dense()
+        D = torch.sum(dense, dim=1).float()
+        D[D == 0.] = 1.
+        D_sqrt = torch.sqrt(D).unsqueeze(dim=0)
+        dense = dense / D_sqrt
+        dense = dense / D_sqrt.t()
+        index = dense.nonzero(as_tuple=False)
+        data = dense[dense >= 1e-9]
+        assert len(index) == len(data)
+        Graph = torch.sparse_coo_tensor(index.t(), data, torch.Size(
+            [dataset.num_users + dataset.num_items, dataset.num_users + dataset.num_items]), dtype=torch.float)
+        Graph = Graph.coalesce()
+        return Graph
+
+    def _construct_large_graph(self, dataset):
+        adj_mat = sp.dok_matrix((dataset.num_users + dataset.num_items, dataset.num_users + dataset.num_items), dtype=np.float32)
+        adj_mat = adj_mat.tolil()
+        train_pairs = dataset.train_pairs.numpy()
+        UserItemNet  = csr_matrix((np.ones(len(train_pairs)), (train_pairs[:, 0], train_pairs[:, 1])), shape=(dataset.num_users, dataset.num_items))
+        R = UserItemNet.tolil()
+        adj_mat[:dataset.num_users, dataset.num_users:] = R
+        adj_mat[dataset.num_users:, :dataset.num_users] = R.T
+        adj_mat = adj_mat.todok()
+        rowsum = np.array(adj_mat.sum(axis=1))
+        d_inv = np.power(rowsum, -0.5).flatten()
+        d_inv[np.isinf(d_inv)] = 0.
+        d_mat = sp.diags(d_inv)
+        
+        norm_adj = d_mat.dot(adj_mat)
+        norm_adj = norm_adj.dot(d_mat)
+        norm_adj = norm_adj.tocsr()
+        Graph = convert_sp_mat_to_sp_tensor(norm_adj)
+        Graph = Graph.coalesce()
+        return Graph

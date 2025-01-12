@@ -18,16 +18,16 @@ lightgcn:
   batch_size: 2048
   lr: 1.e-3
   wd: 1.e-5
-  lmbda: 10
+  lmbda: 100000
   mkd_tau: 1
   mkd_K: 100
   mkd_L: 50
   mkd_T: 10
-  mkd_mxK: 100
-  mkd_beta: 5
+  mkd_mxK: 200
+  mkd_beta: 1
   sample_rank: False
   mkd_T2: 100
-  preload: False
+  preload: True
 simplex:
   epochs: 1000
   batch_size: 2048

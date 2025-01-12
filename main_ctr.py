@@ -115,6 +115,7 @@ def main(args):
     if not args.no_save:
         embedding_dim = teacher_args.embedding_dim if args.train_teacher else student_args.embedding_dim
         backbone_name = teacher_args.model if args.train_teacher else student_args.model
+        args.suffix = '' if args.suffix == "teacher" else args.suffix
         save_dir = os.path.join("checkpoints", args.dataset, args.S_backbone, f"{args.model.lower()}-{backbone_name.lower()}-{embedding_dim}" + ('_' if args.suffix != '' else '') + args.suffix)
         os.makedirs(save_dir, exist_ok=True)
         torch.save(best_model, os.path.join(save_dir, "BEST_EPOCH.pt"))
