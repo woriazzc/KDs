@@ -29,11 +29,11 @@ hstu:
   batch_size: 2048
   lr: 1.e-3
   wd: 1.e-5
-  lmbda: 5
+  lmbda: 50000
   mkd_tau: 1
-  mkd_K: 50
-  mkd_L: 50
+  mkd_K: 100
+  mkd_L: 100
   mkd_T: 10
-  mkd_mxK: 100
+  mkd_mxK: 500
   mkd_beta: 5
   sample_rank: False

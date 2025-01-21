@@ -1509,10 +1509,10 @@ class MRRD(BaseKD4Rec):
         err =  sum(gen_errors) / len(gen_errors)
         return err
     
-    def forward(self, batch_user, batch_pos_item, batch_neg_item):
-        output = self.student(batch_user, batch_pos_item, batch_neg_item)
+    def forward(self, *params):
+        output = self.student(*params)
         base_loss = self.student.get_loss(output)
-        kd_loss = self.get_loss(batch_user, batch_pos_item, batch_neg_item)
+        kd_loss = self.get_loss(*params)
         if self.test_generalization > 0:
             loss = self.lmbda * kd_loss
         else:
@@ -1660,7 +1660,8 @@ class MRRD(BaseKD4Rec):
             loss += self.gamma * self.neg_loss(S, S2)
         return loss
     
-    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+    def get_loss(self, *params):
+        batch_user = params[0]
         users = batch_user.unique()
         if self.loss_type in ["ce", "listnet"]:
             uninteresting_items = torch.index_select(self.uninteresting_items, 0, users).type(torch.LongTensor).cuda()

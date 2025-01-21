@@ -9,3 +9,5 @@ lightgcn:
   rrd_L: 100
   rrd_T: 10
   rrd_mxK: 500
+  sample_from_score: False
+  no_sort: False
