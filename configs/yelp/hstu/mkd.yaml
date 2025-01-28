@@ -1,31 +1,3 @@
-bpr:
-  epochs: 1000
-  batch_size: 2048
-  lr: 1.e-3
-  wd: 1.e-5
-  lmbda: 10
-  mkd_tau: 1
-  mkd_K: 100
-  mkd_L: 50
-  mkd_T: 10
-  mkd_mxK: 100
-  mkd_beta: 5
-  sample_rank: False
-  preload: False
-lightgcn:
-  epochs: 1000
-  batch_size: 2048
-  lr: 1.e-3
-  wd: 1.e-5
-  lmbda: 10
-  mkd_tau: 1
-  mkd_K: 100
-  mkd_L: 50
-  mkd_T: 10
-  mkd_mxK: 100
-  mkd_beta: 5
-  sample_rank: False
-  preload: True
 hstu:
   epochs: 1000
   batch_size: 400

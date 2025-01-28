@@ -1,0 +1,13 @@
+hstu:
+  epochs: 1000
+  batch_size: 512
+  lr: 1.e-3
+  wd: 1.e-8
+  lmbda: 0.5
+  cd_sample_num: 3000
+  cd_strategy: "student guide"
+  cd_T: 20.
+  cd_n_distill: 2
+  cd_t1: 2.
+  cd_t2: 0.
+  preload: True

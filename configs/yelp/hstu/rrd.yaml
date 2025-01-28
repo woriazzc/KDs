@@ -1,33 +1,9 @@
-bpr:
-  epochs: 1000
-  batch_size: 2048
-  lr: 1.e-3
-  wd: 1.e-5
-  lmbda: 0.1
-  rrd_K: 100
-  rrd_L: 200
-  rrd_T: 10
-  rrd_mxK: 500
-  sample_from_score: False
-  no_sort: False
-lightgcn:
-  epochs: 1000
-  batch_size: 2048
-  lr: 1.e-3
-  wd: 1.e-5
-  lmbda: 0.05
-  rrd_K: 100
-  rrd_L: 200
-  rrd_T: 10
-  rrd_mxK: 500
-  sample_from_score: False
-  no_sort: False
 hstu:
   epochs: 1000
   batch_size: 128
   lr: 1.e-3
   wd: 1.e-5
-  lmbda: 0.1
+  lmbda: 0.0001
   rrd_K: 100
   rrd_L: 200
   rrd_T: 10

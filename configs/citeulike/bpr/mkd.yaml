@@ -37,3 +37,4 @@ hstu:
   mkd_mxK: 500
   mkd_beta: 5
   sample_rank: False
+  preload: True

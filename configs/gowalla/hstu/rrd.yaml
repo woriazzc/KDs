@@ -1,13 +1,13 @@
-lightgcn:
+hstu:
   epochs: 1000
-  batch_size: 2048
+  batch_size: 128
   lr: 1.e-3
-  wd: 1.e-8
-  lmbda: 0.5
+  wd: 1.e-5
+  lmbda: 0.0001
   rrd_K: 200
   rrd_L: 100
   rrd_T: 10
-  rrd_mxK: 500
+  rrd_mxK: 200
   sample_from_score: False
   no_sort: False
   preload: True
