@@ -259,7 +259,8 @@ class CD(BaseKD4Rec):
         self.rank_samples = self.rank_samples.cuda().long()
 
 
-    def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
+    def get_loss(self, *params):
+        batch_users = params[0]
         random_samples = self.rank_samples[batch_users, :]
         samples_scores_T = self.teacher.forward_multi_items(batch_users, random_samples)
         samples_scores_S = self.student.forward_multi_items(batch_users, random_samples)
@@ -351,7 +352,7 @@ class DE(BaseKD4Rec):
 class RRD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
-        
+        self.model_name = "rrd"
         self.K = args.rrd_K
         self.L = args.rrd_L
         self.T = args.rrd_T
@@ -512,7 +513,8 @@ class DCD(BaseKD4Rec):
         loss = F.cross_entropy(logit_S / self.tau, prob_T, reduction='sum')
         return loss
 
-    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+    def get_loss(self, *params):
+        batch_user = params[0]
         users = batch_user.unique()
         underestimated_items, overestimated_items = self.get_samples(users)
         underestimated_items = underestimated_items.type(torch.LongTensor).cuda()
@@ -939,7 +941,7 @@ class HetComp(BaseKD4Rec):
         return topK_items
 
     def construct_teacher_trajectory(self):
-        T_dir = os.path.join("checkpoints", self.args.dataset, self.args.backbone, f"scratch-{self.teacher.embedding_dim}")
+        T_dir = os.path.join("checkpoints", self.args.dataset, self.args.T_backbone.lower(), f"scratch-{self.teacher.embedding_dim}")
         assert os.path.exists(T_dir), f"Teacher path {T_dir} doesn't exists."
         old_state = deepcopy(self.teacher.state_dict())
         f_ckpts = []
@@ -1060,7 +1062,8 @@ class HetComp(BaseKD4Rec):
 
         return  pos_KD_loss + top_KD_loss / 2
 
-    def get_loss(self, batch_users):
+    def get_loss(self, *params):
+        batch_users = params[0]
         batch_full_mat = torch.clamp(self.student.get_ratings(batch_users), min=-40, max=40)
         batch_user_mask = torch.index_select(self.user_mask, 0, batch_users).to_dense()
         t_items = torch.index_select(self.top_items, 0, batch_users)
@@ -1070,11 +1073,6 @@ class HetComp(BaseKD4Rec):
         else:
             KD_loss = self.rank_loss(batch_full_mat, p_items, t_items, batch_user_mask)
         return KD_loss
-
-    def forward(self, batch_user, batch_pos_item, batch_neg_item):
-        kd_loss = self.get_loss(batch_user)
-        loss = self.lmbda * kd_loss
-        return loss
 
 
 class Fit(BaseKD4Rec):
