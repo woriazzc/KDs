@@ -19,13 +19,13 @@ class Evaluator:
         self.early_stop_patience = args.early_stop_patience
         self.early_stop_metric = args.early_stop_metric
         self.task = args.task
-        if self.task == 'rec':
+        if self.task == "rec" or self.task == "mm":
             self.K_list = args.K_list
             self.K_max = max(self.K_list)
             self.early_top_K = args.early_stop_K
             self.metrics = ['Recall', 'NDCG']
             self.METRICS_DICT = {metric: {K: -1. for K in self.K_list} for metric in self.metrics}
-        elif self.task == 'ctr':
+        elif self.task == "ctr":
             self.metrics = ['AUC', 'LogLoss']
             self.METRICS_DICT = {metric: -1. for metric in self.metrics}
             self.METRICS_DICT['LogLoss'] = 1e10
@@ -142,9 +142,9 @@ class Evaluator:
         model.eval()
         with torch.no_grad():
             tic = time.time()
-            if self.task == 'rec':
+            if self.task == "rec" or self.task == "mm":
                 eval_results = self.evaluate_rec(model, train, valid, test)
-            elif self.task == 'ctr':
+            elif self.task == "ctr":
                 eval_results = self.evaluate_ctr(model, valid, test)
             else: raise NotImplementedError
 
@@ -153,11 +153,11 @@ class Evaluator:
             is_improved = False
 
             if self.eval_dict['early_stop'] < self.eval_dict['early_stop_max']:
-                if self.task == 'rec':
+                if self.task == "rec" or self.task == "mm":
                     K = self.early_top_K
                     best_performance = self.eval_dict['best_result'][metric][K]
                     cur_performance = eval_results['valid'][metric][K]
-                elif self.task == 'ctr':
+                elif self.task == "ctr":
                     best_performance = self.eval_dict['best_result'][metric]
                     cur_performance = eval_results['valid'][metric]
                 else:
@@ -201,11 +201,11 @@ class Evaluator:
         for mode in ['valid', 'test']:
             logger.log('\t', mode, end='')
             for metric in self.metrics:
-                if self.task == 'rec':
+                if self.task == "rec" or self.task == "mm":
                     for K in self.K_list:
                         result = eval_results[mode][metric][K]
                         logger.log('{}@{}: {:.5f} '.format(metric, K, result), pre=False, end='')
-                elif self.task == 'ctr':
+                elif self.task == "ctr":
                     result = eval_results[mode][metric]
                     logger.log('{}: {:.5f} '.format(metric, result), pre=False, end='')
                 else:

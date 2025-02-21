@@ -95,3 +95,21 @@ class BaseKD4CTR(BaseKD):
 
     def get_ratings(self, data):
         return self.student(data)
+
+
+class BaseKD4MM(BaseKD):
+    def __init__(self, args, teacher, student, frozen_teacher=True):
+        super().__init__(args, teacher, student, frozen_teacher)
+        self.dataset = self.student.dataset
+        self.num_users = self.dataset.num_users
+        self.num_items = self.dataset.num_items
+    
+    def forward(self, *params):
+        output = self.student(*params)
+        base_loss = self.student.get_loss(output)
+        kd_loss = self.get_loss(*params)
+        loss = base_loss + self.lmbda * kd_loss
+        return loss, base_loss.detach(), kd_loss.detach()
+    
+    def get_ratings(self, batch_user):
+        return self.student.get_ratings(batch_user)

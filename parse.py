@@ -23,7 +23,7 @@ parser.add_argument('--suffix', type=str, default='')
 parser.add_argument('--verbose', action='store_true', help="For mlflow")
 parser.add_argument('--ablation', action='store_true', help="perform ablation")
 
-parser.add_argument('--task', type=str, choices=['rec, ctr'], default='rec')
+parser.add_argument('--task', type=str, choices=["rec", "mm", "ctr"], default='rec')
 parser.add_argument('--dataset', type=str, default='gowalla')
 parser.add_argument('--batch_size', type=int, default=4096)
 parser.add_argument('--num_ns', type=int, default=1)
@@ -90,7 +90,7 @@ else:
     model_config = model_config[args.T_backbone.lower()]
 backbone_config = load_yaml(os.path.join(CONFIG_DIR, args.dataset.lower(), args.S_backbone.lower(), f"base_config.yaml"))
 args = parse_cfg(args, model_config, args.cfg)
-assert args.T_backbone.lower() in backbone_config["teacher"], "Unimplented Teacher backbone. Please complete the configuration."
+assert args.T_backbone.lower() in backbone_config["teacher"], f"Unimplented Teacher backbone {args.T_backbone}. Please complete the configuration."
 teacher_args = parse_cfg(teacher_args, backbone_config["teacher"][args.T_backbone.lower()], args.teacher)
 student_args = parse_cfg(student_args, backbone_config["student"], args.student)
 args.__dict__.pop("cfg", None)

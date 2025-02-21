@@ -20,6 +20,7 @@ class BM3(BaseMM):
         self.cl_weight = args.cl_weight
         self.dropout = args.dropout
 
+        self.modality_names = list(mm_dict.keys())
         self.Graph = BipartitleGraph(args, dataset).graph
         self.user_id_emb = nn.Embedding(self.num_users, self.embedding_dim)
         self.item_id_emb = nn.Embedding(self.num_items, self.embedding_dim)
@@ -101,6 +102,14 @@ class BM3(BaseMM):
         users = self.predictor(all_users)
         items = self.predictor(all_items)
         return users, items
+    
+    def get_item_modality_embedding(self, batch_item):
+        mm_feat_dict = {}
+        for modality in self.mm_emb_dict:
+            trs = self.mm_trs_dict[modality]
+            feat = self.mm_emb_dict[modality](batch_item)
+            mm_feat_dict[modality] = trs(feat)
+        return mm_feat_dict
     
     def forward_multi_items(self, batch_user, batch_items):
         """forward when we have multiple items for a user

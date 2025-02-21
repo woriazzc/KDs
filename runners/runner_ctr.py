@@ -6,14 +6,13 @@ from copy import deepcopy
 import torch
 import torch.optim as optim
 
-from parse import *
 from dataset import get_ctr_dataset
 from evaluation import Evaluator
-import modeling.backbone as backbone
-import modeling.KD as KD
-from utils import seed_all, avg_dict, Logger
+from modeling import backbone
+from modeling import KD
 
-def main(args):
+
+def main(args, teacher_args, student_args, logger):
     # Dataset
     train_loader, valid_loader, test_loader, feature_stastic = get_ctr_dataset(args)
 
@@ -125,36 +124,3 @@ def main(args):
             torch.save(ckpt, os.path.join(save_dir, f"EPOCH_{(idx + 1) * args.ckpt_interval}.pt"))
 
     return eval_dict
-
-
-if __name__ == '__main__':
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.gpu_id)
-    logger = Logger(args, args.no_log)
-    args.task = 'ctr'
-    args.early_stop_metric = "AUC"
-    args.early_stop_patience = 2
-
-    if args.run_all:
-        args_copy = deepcopy(args)
-        eval_dicts = []
-        for seed in range(5):
-            args = deepcopy(args_copy)
-            args.seed = seed
-            seed_all(args.seed)
-            logger.log_args(teacher_args, "TEACHER")
-            if not args.train_teacher:
-                logger.log_args(student_args, "STUDENT")
-            logger.log_args(args, "ARGUMENTS")
-            eval_dicts.append(main(args))
-        
-        avg_eval_dict = avg_dict(eval_dicts)
-
-        logger.log('=' * 60)
-        Evaluator.print_final_result(logger, avg_eval_dict, prefix="avg ")
-    else:
-        logger.log_args(teacher_args, "TEACHER")
-        if not args.train_teacher:
-            logger.log_args(student_args, "STUDENT")
-        logger.log_args(args, "ARGUMENTS")
-        seed_all(args.seed)
-        main(args)

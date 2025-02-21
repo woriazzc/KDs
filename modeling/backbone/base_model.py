@@ -227,7 +227,13 @@ class BaseMM(BaseCF):
         super().__init__(dataset, args)
         self.mm_dict = mm_dict
 
-    
+    def get_item_modality_embedding(self, batch_item):
+        return None
+
+    def get_item_modality_embedding(self, batch_user):
+        return None
+
+
 class BaseCTR(nn.Module):
     def __init__(self, args, feature_stastic):
         super().__init__()

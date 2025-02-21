@@ -422,8 +422,8 @@ class GraphD(BaseKD4Rec):
         return topk_indices[:, 1:].cuda()
 
     def get_nearest_K(self, all_u, all_i, K):
-        f_nearestK_u = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"nearest_{K}_u.pkl")
-        f_nearestK_i = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"nearest_{K}_i.pkl")
+        f_nearestK_u = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"nearest_{K}_u.pkl")
+        f_nearestK_i = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"nearest_{K}_i.pkl")
         sucflg, nearestK_u, nearestK_i = load_pkls(f_nearestK_u, f_nearestK_i)
         if not sucflg:
             nearestK_u = self._KNN(all_u, K)
