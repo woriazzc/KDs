@@ -9,5 +9,5 @@ teacher:
     cl_weight: 5
     dropout: 0.5
 student:
-  init_std: 1.e-2
+  init_std: 1.e-3
   embedding_dim: 20

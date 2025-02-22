@@ -1,7 +1,6 @@
 from copy import deepcopy
 import time
 import numpy as np
-from tqdm import tqdm
 from sklearn.metrics import log_loss, roc_auc_score
 
 import torch
@@ -9,7 +8,6 @@ import torch.utils.data as data
 
 from utils import to_np
 from utils.metric import Precision, Recall, NDCG, get_labels
-from dataset import implicit_SR_dataset
 
 
 METRIC2FUNC = {'Recall': Recall, 'NDCG': NDCG, 'Precision': Precision, 'AUC': roc_auc_score, 'LogLoss': log_loss}

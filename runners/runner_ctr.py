@@ -6,8 +6,8 @@ from copy import deepcopy
 import torch
 import torch.optim as optim
 
-from dataset import get_ctr_dataset
-from evaluation import Evaluator
+from modules.dataset import get_ctr_dataset
+from modules.evaluation import Evaluator
 from modeling import backbone
 from modeling import KD
 

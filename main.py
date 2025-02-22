@@ -1,8 +1,8 @@
 import os
 from copy import deepcopy
 
-from parse import *
-from evaluation import Evaluator
+from modules.parse import *
+from modules.evaluation import Evaluator
 from utils import seed_all, avg_dict, Logger
 import runners
 

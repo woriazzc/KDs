@@ -7,8 +7,8 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from dataset import load_cf_data, implicit_CF_dataset, implicit_CF_dataset_test, implicit_SR_dataset
-from evaluation import Evaluator
+from modules.dataset import load_cf_data, implicit_CF_dataset, implicit_CF_dataset_test, implicit_SR_dataset
+from modules.evaluation import Evaluator
 from modeling import backbone
 from modeling import KD
 

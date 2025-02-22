@@ -4,10 +4,10 @@ bm3:
   lr: 1.e-3
   wd: 1.e-7
   lmbda: 1.0
-  freqmm_K: 5
+  freqmm_K: 3
   freqmm_alpha1: 0.7
   freqmm_alpha2: 0.7
   freqmm_beta: 0.1
-  freqmm_keep_prob: 0.5
+  freqmm_keep_prob: 0.3
   freqmm_dropout_rate: 0.2
   hidden_dim_ratio: 5
