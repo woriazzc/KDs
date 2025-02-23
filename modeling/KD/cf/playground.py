@@ -12,7 +12,7 @@ import torch.nn.functional as F
 
 from ..utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph
 from ..base_model import BaseKD4Rec
-from ..baselines.general_baseline import DE
+from .baseline import DE
 
 
 class CPD(DE):

@@ -9,7 +9,8 @@ from torch.utils.data import DataLoader
 from modules.dataset import load_cf_data, load_multimodal, implicit_CF_dataset, implicit_CF_dataset_test, implicit_SR_dataset
 from modules.evaluation import Evaluator
 from modeling import backbone
-from modeling import KD
+from modeling.KD.general import Scratch
+import modeling.KD.mm as KD
 
 
 def main(args, teacher_args, student_args, logger):
@@ -45,9 +46,9 @@ def main(args, teacher_args, student_args, logger):
 
     if args.model.lower() == "scratch":
         if args.train_teacher:
-            model = KD.Scratch(args, Teacher).cuda()
+            model = Scratch(args, Teacher).cuda()
         else:
-            model = KD.Scratch(args, Student).cuda()
+            model = Scratch(args, Student).cuda()
     else:
         T_path = os.path.join("checkpoints", args.dataset, args.T_backbone, f"scratch-{teacher_args.embedding_dim}")
         if args.preload: T_path = os.path.join(T_path, "BEST_SCORE_MAT.pt")
@@ -79,7 +80,7 @@ def main(args, teacher_args, student_args, logger):
     if args.model.lower() != "scratch":
         logger.log('-' * 40 + "Teacher" + '-' * 40, pre=False)
         tmp_evaluator = Evaluator(args)
-        tmp_model = KD.Scratch(args, Teacher).cuda()
+        tmp_model = Scratch(args, Teacher).cuda()
         is_improved, early_stop, eval_results, elapsed = tmp_evaluator.evaluate_while_training(tmp_model, -1, train_loader, validset, testset)
         Evaluator.print_final_result(logger, tmp_evaluator.eval_dict)
         logger.log('-' * 88, pre=False)
