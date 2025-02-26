@@ -1,0 +1,21 @@
+Chronologically-ordered Amazon2014-Clothing dataset.
+
+Config:
+-------
+filename: clothing
+dataset: Amazon2014-Clothing
+kcore4user: 5
+kcore4item: 5
+star4pos: 0
+ratios: (8, 1, 1)
+splitting: ROU
+
+Statistics:
+-----------
++-------+-------+---------------+--------+--------+--------+-----------------------+
+| #User | #Item | #Interactions | #Train | #Valid | #Test  |        Density        |
++-------+-------+---------------+--------+--------+--------+-----------------------+
+| 39387 | 23033 |     278677    | 197338 | 40150  |  41189 | 0.0003071833809100676 |
++-------+-------+---------------+--------+--------+--------+-----------------------+
+
+URL = "https://zenodo.org/records/11003225/files/Amazon2014Clothing_550_MMRec.zip"

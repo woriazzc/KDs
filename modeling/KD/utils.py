@@ -40,10 +40,23 @@ def self_loop_graph(N):
 
 
 def pca(X:torch.tensor, n_components:int) -> torch.tensor:
+    device = X.device
     X = X.detach().cpu().numpy()
     pca = PCA(n_components=n_components)
-    reduced_X = torch.from_numpy(pca.fit_transform(X)).cuda()
+    reduced_X = torch.from_numpy(pca.fit_transform(X)).to(device)
     return reduced_X
+
+
+def frequency(Adj:torch.sparse_coo_tensor, X:torch.Tensor):
+    """ X: shape (|V|, d)
+    """
+    # U, S, V = torch.svd_lowrank(Adj, q=k, niter=30)
+    S_low, U_low = torch.lobpcg(Adj, k=200, largest=True)
+    S_high, U_high = torch.lobpcg(Adj, k=200, largest=False)
+    S = torch.cat([S_low, S_high])
+    U = torch.cat([U_low, U_high], dim=-1)  # (|V|, 2k)
+    freq = X.T.mm(U)  # (d, 2k)
+    return freq
 
 
 class Normalize(nn.Module):
@@ -342,3 +355,19 @@ class TCA:
             X_s_new = X_s.mm(A)
             X_t_new = X_t.mm(A)
         return X_s_new, X_t_new
+
+
+def sym_norm_graph(Graph):
+    shape = Graph.shape
+    dense = Graph.to_dense()
+    D = torch.sum(dense, dim=1).float()
+    D[D == 0.] = 1.
+    D_sqrt = torch.sqrt(D).unsqueeze(dim=0)
+    dense = dense / D_sqrt
+    dense = dense / D_sqrt.t()
+    index = dense.nonzero(as_tuple=False)
+    data = dense[dense >= 1e-9]
+    assert len(index) == len(data)
+    Graph = torch.sparse_coo_tensor(index.t(), data, shape, dtype=torch.float)
+    Graph = Graph.coalesce()
+    return Graph

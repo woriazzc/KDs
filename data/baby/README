@@ -1,0 +1,21 @@
+Chronologically-ordered Amazon2014-Baby dataset.
+
+Config:
+-------
+filename: baby
+dataset: Amazon2014-Baby
+kcore4user: 5
+kcore4item: 5
+star4pos: 0
+ratios: (8, 1, 1)
+splitting: ROU
+
+Statistics:
+-----------
++-------+-------+---------------+--------+--------+--------+-----------------------+
+| #User | #Item | #Interactions | #Train | #Valid | #Test  |        Density        |
++-------+-------+---------------+--------+--------+--------+-----------------------+
+| 19445 | 7050  |     160792    | 118551 | 20559  |  21682 | 0.0011729172479570493 |
++-------+-------+---------------+--------+--------+--------+-----------------------+
+
+URL = "https://zenodo.org/records/11003225/files/Amazon2014Baby_550_MMRec.zip"

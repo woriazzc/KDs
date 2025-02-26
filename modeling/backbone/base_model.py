@@ -230,7 +230,7 @@ class BaseMM(BaseCF):
     def get_item_modality_embedding(self, batch_item):
         return None
 
-    def get_item_modality_embedding(self, batch_user):
+    def get_item_modality_embedding(self, batch_item):
         return None
 
 

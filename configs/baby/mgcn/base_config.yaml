@@ -1,0 +1,15 @@
+teacher:
+  mgcn:
+    embedding_dim: 500
+    n_ui_layers: 2
+    knn_k: 10
+    n_mm_layers: 1
+    reg_weight: 0.0001
+    cl_weight: 1
+student:
+  embedding_dim: 20
+  n_ui_layers: 2
+  knn_k: 10
+  n_mm_layers: 1
+  reg_weight: 0.0001
+  cl_weight: 1

@@ -1,0 +1,21 @@
+Chronologically-ordered Amazon2014-Sports dataset.
+
+Config:
+-------
+filename: sports
+dataset: Amazon2014-Sports
+kcore4user: 5
+kcore4item: 5
+star4pos: 0
+ratios: (8, 1, 1)
+splitting: ROU
+
+Statistics:
+-----------
++-------+-------+---------------+--------+--------+--------+-----------------------+
+| #User | #Item | #Interactions | #Train | #Valid | #Test  |        Density        |
++-------+-------+---------------+--------+--------+--------+-----------------------+
+| 35598 | 18357 |     296337    | 218409 | 37899  | 40029  | 0.0004534804545695899 |
++-------+-------+---------------+--------+--------+--------+-----------------------+
+
+URL = "https://zenodo.org/records/11003225/files/Amazon2014Sports_550_MMRec.zip"

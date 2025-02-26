@@ -1,0 +1,21 @@
+Chronologically-ordered Amazon2014-Electronics dataset.
+
+Config:
+-------
+filename: electronics
+dataset: Amazon2014-Electronics
+kcore4user: 5
+kcore4item: 5
+star4pos: 0
+ratios: (8, 1, 1)
+splitting: ROU
+
+Statistics:
+-----------
++--------+-------+---------------+---------+--------+--------+-----------------------+
+| #User  | #Item | #Interactions | #Train  | #Valid | #Test  |        Density        |
++-------+-------+----------------+---------+--------+--------+-----------------------+
+| 192403 | 63001 |     1689188   | 1254441 | 211296 | 223451 | 0.0001393537644833981 |
++--------+-------+---------------+---------+--------+--------+-----------------------+
+
+URL = "https://zenodo.org/records/11003225/files/Amazon2014Electronics_550_MMRec.zip"

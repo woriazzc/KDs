@@ -1,0 +1,7 @@
+teacher:
+  vbpr:
+    embedding_dim: 500
+    reg_weight: 0.1
+student:
+  embedding_dim: 20
+  reg_weight: 0.1
