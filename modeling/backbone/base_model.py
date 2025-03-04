@@ -226,12 +226,31 @@ class BaseMM(BaseCF):
     def __init__(self, dataset, mm_dict, args):
         super().__init__(dataset, args)
         self.mm_dict = mm_dict
+        self.modality_names = list(mm_dict.keys())
 
     def get_item_modality_embedding(self, batch_item):
         return None
 
     def get_item_modality_embedding(self, batch_item):
         return None
+    
+    def forward_multi_items(self, batch_user, batch_items):
+        all_users, all_items = self.get_all_embedding()
+        u = all_users[batch_user]		# batch_size x dim
+        i = all_items[batch_items]		# batch_size x k x dim
+        score = torch.bmm(i, u.unsqueeze(-1)).squeeze(-1)   # batch_size, k
+        return score
+    
+    def get_all_ratings(self):
+        users, items = self.get_all_embedding()
+        score_mat = torch.matmul(users, items.T)
+        return score_mat
+
+    def get_ratings(self, batch_user):
+        users, items = self.get_all_embedding()
+        users = users[batch_user]
+        score_mat = torch.matmul(users, items.T)
+        return score_mat
 
 
 class BaseCTR(nn.Module):

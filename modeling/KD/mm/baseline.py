@@ -10,6 +10,7 @@ import torch.nn.functional as F
 
 from ..utils import Projector
 from ..base_model import BaseKD4MM
+from ..cf import RRD
 
 
 class FitNet(BaseKD4MM):

@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph
+from ..utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph, sym_norm_graph
 from ..base_model import BaseKD4Rec
 from .baseline import DE
 
@@ -646,219 +646,144 @@ class FilterD(BaseKD4Rec):
         return DE_loss
 
 
-class FD(BaseKD4Rec):
+class IdealD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
-        self.model_name = "fd"
-
-        self.num_experts = args.fd_num_experts
-        self.dropout_rate = args.fd_dropout_rate
-        self.alpha = args.fd_alpha
-        self.beta = args.fd_beta
-        self.eig_ratio = args.fd_eig_ratio
-        self.num_anchors = args.fd_num_anchors
-        self.K = args.fd_K
+        self.model_name = "ideald"
+        self.filter_id = args.filter_id
+        self.norm = args.norm
+        self.K = args.ideald_K
+        self.dropout_rate = args.ideald_dropout_rate
+        self.hidden_dim_ratio = args.hidden_dim_ratio
         
         self.student_dim = self.student.embedding_dim
         self.teacher_dim = self.teacher.embedding_dim
-
-        self.norm = False
-        self.S_user_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=False, dropout_rate=self.dropout_rate)
-        self.S_item_experts = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=False, dropout_rate=self.dropout_rate)
-
-        all_u, all_i = self.teacher.get_all_embedding()
-        nearestK_u, nearestK_i = self.get_nearest_K(all_u, all_i, self.K)
-        self.filter_u = self.construct_knn_filter(nearestK_u, entity_type='u')
-        self.filter_i = self.construct_knn_filter(nearestK_i, entity_type='i')
-
-        self.anchor_filters_u = self.construct_anchor_filters(entity_type='u')
-        self.anchor_filters_i = self.construct_anchor_filters(entity_type='i')
-        self.global_step = 0
-    
-    def get_params_to_update(self):
-        return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
-
-    def _KNN(self, embs, K):
-        with torch.no_grad():
-            embs = pca(embs, 150)
-            topk_indices = knn(embs, embs, k=K+1)[1].reshape(-1, K + 1)
-        return topk_indices[:, 1:].cuda()
-
-    def get_nearest_K(self, all_u, all_i, K):
-        f_nearestK_u = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"nearest_{K}_u.pkl")
-        f_nearestK_i = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"nearest_{K}_i.pkl")
-        sucflg, nearestK_u, nearestK_i = load_pkls(f_nearestK_u, f_nearestK_i)
-        if not sucflg:
-            nearestK_u = self._KNN(all_u, K)
-            nearestK_i = self._KNN(all_i, K)
-            dump_pkls((nearestK_u, f_nearestK_u), (nearestK_i, f_nearestK_i))
-        return nearestK_u, nearestK_i
-    
-    def construct_knn_filter(self, neighbor_id, entity_type):
-        N, K = neighbor_id.shape
-        smooth_dim = int(N * self.eig_ratio)
-        f_smooth_values = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_values_{entity_type}_{smooth_dim}.pkl")
-        f_smooth_vectors = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_vectors_{entity_type}_{smooth_dim}.pkl")
-        sucflg, smooth_values, smooth_vectors = load_pkls(f_smooth_values, f_smooth_vectors)
-        if sucflg:
-            filter = (smooth_vectors * self.weight_feature(smooth_values)).mm(smooth_vectors.t())
-            return filter.cuda()
-        
-        row = torch.arange(N).repeat(K, 1).T.reshape(-1).cuda()
-        col = neighbor_id.reshape(-1)
-        index = torch.stack([row, col], dim=1)
-        data = torch.ones(index.size(0)).cuda() / K
-
-        self_loop_idx = torch.stack([torch.arange(N), torch.arange(N)], dim=1).cuda()
-        self_loop_data = torch.ones(self_loop_idx.size(0)).cuda()
-
-        data = torch.cat([data * (1. - self.alpha), self_loop_data * self.alpha])
-        index = torch.cat([index, self_loop_idx], dim=0)
-
-        Graph = torch.sparse_coo_tensor(index.t(), data, torch.Size([N, N]), dtype=torch.float)
-        Graph = (Graph.t() + Graph) / 2.
-        Graph = self._sym_normalize(Graph)
-
-        if self.eig_ratio <= 0.3:
-            smooth_values, smooth_vectors = torch.lobpcg(Graph, k=smooth_dim, largest=True, niter=5)
+        self.projector_u = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
+        self.projector_i = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
+        self.all_T_u, self.all_T_i = self.teacher.get_all_embedding()
+        Graph_u = self.construct_knn_graph(self.all_T_u, self.K, "user")
+        Graph_i = self.construct_knn_graph(self.all_T_i, self.K, "item")
+        U_user = self.eig_decompose(Graph_u, "user")
+        U_item = self.eig_decompose(Graph_i, "item")
+        self.anchor_filters_user = self.construct_anchor_filters(U_user)
+        self.anchor_filters_item = self.construct_anchor_filters(U_item)
+        if self.filter_id == -1:
+            self.filter_u = self_loop_graph(self.num_users).cuda()
+            self.filter_i = self_loop_graph(self.num_items).cuda()
         else:
-            smooth_vectors, smooth_values, _ = torch.svd_lowrank(Graph, q=smooth_dim, niter=10)
-        dump_pkls((smooth_values, f_smooth_values), (smooth_vectors, f_smooth_vectors))
-        filter = (smooth_vectors * self.weight_feature(smooth_values)).mm(smooth_vectors.t())
-        return filter.cuda()
+            self.filter_u = self.anchor_filters_user[self.filter_id]
+            self.filter_i = self.anchor_filters_item[self.filter_id]
+        self.global_step = 0
+
+    @torch.no_grad()
+    def _KNN(self, embs, K):
+        embs = pca(embs, 150)
+        topk_indices = knn(embs, embs, k=K+1)[1].reshape(-1, K + 1)
+        return topk_indices[:, 1:].cuda()
     
-    def construct_anchor_filters(self, entity_type):
-        if self.num_anchors == 0: return []
-        smooth_dim = self.num_users if entity_type == 'u' else self.num_items
-        f_all_values = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_values_{entity_type}_{smooth_dim}.pkl")
-        f_all_vectors = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.backbone, self.model_name, f"smooth_vectors_{entity_type}_{smooth_dim}.pkl")
-        sucflg, all_values, all_vectors = load_pkls(f_all_values, f_all_vectors)
-        assert sucflg, "Can't find eig decomposition results."
+    def construct_knn_graph(self, all_embed, K, name):
+        f_graph = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"Graph_{name}_{K}.pkl")
+        sucflg, Graph = load_pkls(f_graph)
+        if sucflg: return Graph.cuda()
+        N = all_embed.shape[0]
+        nearestK = self._KNN(all_embed, K)
+        row = torch.arange(N).repeat(K, 1).T.reshape(-1).cuda()
+        col = nearestK.reshape(-1)
+        index = torch.stack([row, col])
+        data = torch.ones(index.size(-1)).cuda()
+        Graph = torch.sparse_coo_tensor(index, data, torch.Size([N, N]), dtype=torch.float)
+        Graph = (Graph + Graph.T) / 2
+        Graph = Graph.coalesce()
+        Graph = sym_norm_graph(Graph)
+        dump_pkls((Graph, f_graph))
+        return Graph.cuda()
+    
+    def eig_decompose(self, Graph, name):
+        f_U = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"U_{name}.pkl")
+        sucflg, U = load_pkls(f_U)
+        if sucflg: return U.cuda()
+        U, S, V = torch.svd(Graph.to_dense())
+        U = U.real
+        dump_pkls((U, f_U))
+        return U.cuda()
+
+    def construct_anchor_filters(self, U):
         anchor_filters = []
-        blk = smooth_dim // self.num_anchors
-        for i in range(self.num_anchors):
-            vectors = all_vectors[:, blk * i:blk * (i + 1)]
+        blk = math.ceil(U.shape[1] / 4)
+        for i in range(4):
+            vectors = U[:, blk * i:blk * (i + 1)]
             filter = vectors.mm(vectors.t())
             anchor_filters.append(filter.cuda())
-        # anchor_filters.append(self.filter_u if entity_type == 'u' else self.filter_i)
         return anchor_filters
-    
-    def weight_feature(self, value):
-        ## exp
-        # return torch.exp(self.beta * (value - value.max())).reshape(1, -1)
-        ## linear
-        return torch.clip(self.beta * (value - value.max()) + 1., 0.).reshape(1, -1)
-        ## reverse linear
-        # return torch.clip(1. - self.beta * (value - value.min()), 0.).reshape(1, -1)
-        ## ideal low pass
-        # return torch.cat([torch.ones_like(value[:len(value) // 4]) * 1.2, 
-        #                   torch.ones_like(value[len(value) // 4:len(value) // 2]), 
-        #                   torch.ones_like(value[len(value) // 2:len(value) // 4 * 3]) * 0.8,
-        #                   torch.ones_like(value[len(value) // 4 * 3:]) * 0.8])
-    
-    def _sym_normalize(self, Graph):
-        dense = Graph.to_dense().cpu()
-        D = torch.sum(dense, dim=1).float()
-        D[D == 0.] = 1.
-        D_sqrt = torch.sqrt(D).unsqueeze(dim=0)
-        dense = dense / D_sqrt
-        dense = dense / D_sqrt.t()
-        index = dense.nonzero(as_tuple=False)
-        data = dense[dense != 0]
-        assert len(index) == len(data)
-        Graph = torch.sparse_coo_tensor(index.t(), data, torch.Size(Graph.size()), dtype=torch.float)
-        return Graph.coalesce().cuda()
 
     def get_features(self, batch_entity, is_user):
         if is_user:
-            T = self.teacher.user_emb.weight
+            T = self.all_T_u
             S = self.student.user_emb.weight
-            experts = self.S_user_experts
+            proj = self.projector_u
             Graph = self.filter_u
         else:
-            T = self.teacher.item_emb.weight
+            T = self.all_T_i
             S = self.student.item_emb.weight
-            experts = self.S_item_experts
+            proj = self.projector_u
             Graph = self.filter_i
-        
-        SP = experts(S)
+        SP = proj(S)
         filtered_S = torch.sparse.mm(Graph, SP)
         filtered_T = torch.sparse.mm(Graph, T)
         filtered_T = filtered_T[batch_entity]
         filtered_S = filtered_S[batch_entity]
-        # filtered_S = experts(filtered_S)
-
         if self.norm:
-            norm_T = T[batch_entity].pow(2).sum(-1, keepdim=True).pow(1. / 2)
-            filtered_T = filtered_T.div(norm_T)
-            norm_S = SP[batch_entity].pow(2).sum(-1, keepdim=True).pow(1. / 2)
-            filtered_S = filtered_S.div(norm_S)
+            filtered_S = F.normalize(filtered_S, p=2, dim=-1)
+            filtered_T = F.normalize(filtered_T, p=2, dim=-1)
+        return filtered_T, filtered_S
+    
+    def get_DE_loss(self, batch_entity, is_user):
+        T_feas, S_feas = self.get_features(batch_entity, is_user)
+        if self.norm:
+            G_diff = 1. - (T_feas * S_feas).sum(-1, keepdim=True)
+        else:
+            G_diff = (T_feas - S_feas).pow(2).sum(-1)
+        loss = G_diff.sum()
+        return loss
+    
+    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+        batch_item = torch.cat([batch_pos_item.unique(), batch_neg_item.unique()]).unique()
+        loss_user = self.get_DE_loss(batch_user, True)
+        loss_item = self.get_DE_loss(batch_item, False)
+        loss = loss_user + loss_item
+        self.log_anchor_loss(batch_user, True)
+        return loss
 
-        return filtered_S, filtered_T
-    
-    def cal_FD_loss(self, T_feas, S_feas):
-        G_diff = ((T_feas - S_feas) ** 2).sum(-1) / 2
-        FD_loss = G_diff.sum()
-        return FD_loss
-    
     @torch.no_grad()
     def log_anchor_loss(self, batch_entity, is_user):
         if is_user:
-            T = self.teacher.user_emb.weight
+            T = self.all_T_u
             S = self.student.user_emb.weight
-            experts = self.S_user_experts
-            anchor_filters = self.anchor_filters_u
+            proj = self.projector_u
+            anchor_filters = self.anchor_filters_user
         else:
-            T = self.teacher.item_emb.weight
+            T = self.all_T_i
             S = self.student.item_emb.weight
-            experts = self.S_item_experts
-            anchor_filters = self.anchor_filters_i
-        
-        # experts.eval()
-        SP = experts(S)
-        # experts.train()
+            proj = self.projector_i
+            anchor_filters = self.anchor_filters_item
         for idx, filter in enumerate(anchor_filters):
-            filtered_S = torch.sparse.mm(filter, SP)
+            filtered_S = torch.sparse.mm(filter, S)
             filtered_T = torch.sparse.mm(filter, T)
             filtered_T = filtered_T[batch_entity]
             filtered_S = filtered_S[batch_entity]
-            # experts.eval()
-            # filtered_S = experts(filtered_S)
-            # experts.train()
+            training = proj.training
+            proj.eval()
+            filtered_SP = proj(filtered_S)
+            proj.train(training)
             if self.norm:
-                norm_T = T[batch_entity].pow(2).sum(-1, keepdim=True).pow(1. / 2)
-                filtered_T = filtered_T.div(norm_T)
-                norm_S = SP[batch_entity].pow(2).sum(-1, keepdim=True).pow(1. / 2)
-                filtered_S = filtered_S.div(norm_S)
-
-                # norm_SP = SP[batch_entity].pow(2).sum(-1)
-                # rat_S = (norm_S.squeeze() / norm_SP).mean().cpu().item()
-                # mlflow.log_metric(f"norm_ASP/norm_SP_{idx}", rat_S, step=self.global_step)
-                # rat_T = (norm_T.squeeze() / T[batch_entity].pow(2).sum(-1)).mean().cpu().item()
-                # mlflow.log_metric(f"norm_AT/norm_T_{idx}", rat_T, step=self.global_step)
-            loss = self.cal_FD_loss(filtered_T, filtered_S)
+                filtered_SP = F.normalize(filtered_SP, p=2, dim=-1)
+                filtered_T = F.normalize(filtered_T, p=2, dim=-1)
+                G_diff = 1. - (filtered_T * filtered_SP).sum(-1, keepdim=True)
+            else:
+                G_diff = (filtered_T - filtered_SP).pow(2).sum(-1) / 2
+            loss = G_diff.sum()
             mlflow.log_metrics({f"anchor_loss_{idx}": (loss / batch_entity.shape[0]).cpu().item()}, step=self.global_step)
-        # self.global_step += 1
-
-    def get_DE_loss(self, batch_entity, is_user):
-        filtered_S, filtered_T = self.get_features(batch_entity, is_user)
-        DE_loss = self.cal_FD_loss(filtered_T, filtered_S)
-        if is_user: self.log_anchor_loss(batch_entity, is_user)
-        return DE_loss
-
-    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
-        DE_loss_user = self.get_DE_loss(batch_user.unique(), True)
-        DE_loss_pos = self.get_DE_loss(batch_pos_item.unique(), False)
-        DE_loss_neg = self.get_DE_loss(batch_neg_item.unique(), False)
-
-        DE_loss = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
-
-        with torch.no_grad():
-            output = self.student(batch_user, batch_pos_item, batch_neg_item)
-            base_loss = self.student.get_loss(output)
-            mlflow.log_metrics({f"base_loss": (base_loss / batch_user.shape[0]).cpu().item()}, step=self.global_step)
-            self.global_step += 1
-        return DE_loss
+        self.global_step += 1
 
 
 class KNND(GraphD):

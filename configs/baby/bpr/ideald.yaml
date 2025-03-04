@@ -1,0 +1,23 @@
+bm3:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-7
+  lmbda: 0.1
+  filter_id: -1
+  norm: False
+  ideald_K: 3
+  ideald_dropout_rate: 0.2
+  hidden_dim_ratio: 1
+mgcn:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-7
+  lmbda: 1.0
+  filter_id: 0
+  norm: False
+  ideald_K: 3
+  ideald_keep_prob: 0.3
+  ideald_dropout_rate: 0.2
+  hidden_dim_ratio: 5

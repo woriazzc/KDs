@@ -97,8 +97,13 @@ For Multi-Modal Prediction Models
 python -u main.py --task=mm --dataset=baby --S_backbone=bm3 --train_teacher --suffix teacher
 python -u main.py --task=mm --dataset=baby --S_backbone=vbpr --train_teacher --suffix teacher
 python -u main.py --task=mm --dataset=baby --S_backbone=mgcn --train_teacher --suffix teacher
+python -u main.py --task=mm --dataset=baby --S_backbone=lgmrec --train_teacher --suffix teacher
+python -u main.py --task=mm --dataset=baby --S_backbone=smore --train_teacher --suffix teacher
 
 python -u main.py --task=mm --dataset=clothing --S_backbone=bm3 --train_teacher --suffix teacher
+python -u main.py --task=mm --dataset=clothing --S_backbone=lgmrec --train_teacher --suffix teacher
+
+python -u main.py --task=mm --dataset=sports --S_backbone=bm3 --train_teacher --suffix teacher
 
 # from scratch
 python -u main.py --task=mm --dataset=baby --S_backbone=bpr --model=scratch --suffix student
@@ -106,9 +111,14 @@ python -u main.py --task=mm --dataset=baby --S_backbone=bpr --model=scratch --su
 python -u main.py --task=mm --dataset=clothing --S_backbone=bpr --model=scratch --suffix student
 
 # KD
-python -u main.py --task=mm --dataset=baby --S_backbone=bpr --T_backbone=bm3 --model=freqmm
 python -u main.py --task=mm --dataset=baby --S_backbone=bpr --T_backbone=bm3 --model=fitnet
+python -u main.py --task=mm --dataset=baby --S_backbone=bpr --T_backbone=lgmrec --model=rrd
+python -u main.py --task=mm --dataset=baby --S_backbone=bpr --T_backbone=bm3 --model=freqmm
+python -u main.py --task=mm --dataset=baby --S_backbone=bpr --T_backbone=mgcn --model=freqmm
+python -u main.py --task=mm --dataset=baby --S_backbone=bpr --T_backbone=lgmrec --model=freqmm
 
+python -u main.py --task=mm --dataset=clothing --S_backbone=bpr --T_backbone=bm3 --model=freqmm
+python -u main.py --task=mm --dataset=clothing --S_backbone=bpr --T_backbone=bm3 --model=rrd
 
 
 """
