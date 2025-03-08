@@ -131,7 +131,7 @@ class BM3(BaseMM):
         ego_embeddings = torch.cat((self.user_id_emb.weight, self.item_id_emb.weight), dim=0)
         all_embeddings = [ego_embeddings]
         for i in range(self.n_layers):
-            ego_embeddings = torch.sparse.mm(self.Graph, ego_embeddings)
+            ego_embeddings = torch.mm(self.Graph.to_dense(), ego_embeddings)
             all_embeddings += [ego_embeddings]
         all_embeddings = torch.stack(all_embeddings, dim=1)
         all_embeddings = all_embeddings.mean(dim=1, keepdim=False)

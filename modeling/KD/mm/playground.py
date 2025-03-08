@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph, sym_norm_graph
+from ..utils import Projector, graph_mm, pca, load_pkls, dump_pkls, self_loop_graph, sym_norm_graph
 from ..base_model import BaseKD4MM
 
 
@@ -29,12 +29,9 @@ class FreqMM(BaseKD4MM):
         self.teacher_dim = self.teacher.embedding_dim
 
         self.all_T_u, self.all_T_i = self.teacher.get_all_embedding()
-        self.all_T_mm = self.teacher.get_item_modality_embedding(self.teacher.item_list)
         
         self.projector_u = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
         self.projector_i = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
-        self.projector_mm = nn.ModuleDict({m: Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
-                                            for m in self.all_T_mm})
         self.Graph_u = self.construct_knn_graph(self.all_T_u, self.K, "user")
         self.Graph_i = self.construct_knn_graph(self.all_T_i, self.K, "item")
     
@@ -262,3 +259,127 @@ class IdealD(BaseKD4MM):
             loss = G_diff.sum()
             mlflow.log_metrics({f"anchor_loss_{idx}": (loss / batch_entity.shape[0]).cpu().item()}, step=self.global_step)
         self.global_step += 1
+
+
+class AdaFreq(BaseKD4MM):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "adafreq"
+        self.norm = args.norm
+        self.K = args.adafreq_K
+        self.keep_prob = args.adafreq_keep_prob
+        self.dropout_rate = args.adafreq_dropout_rate
+        self.hidden_dim_ratio = args.hidden_dim_ratio
+        
+        self.student_dim = self.student.embedding_dim
+        self.teacher_dim = self.teacher.embedding_dim
+
+        self.all_T_u, self.all_T_i = self.teacher.get_all_embedding()
+        
+        self.projector_u = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
+        self.projector_i = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
+        self.Graph_u = self.construct_knn_graph(self.all_T_u, self.K, "user")
+        self.Graph_i = self.construct_knn_graph(self.all_T_i, self.K, "item")
+        self.gate_u = nn.Sequential(
+            nn.Linear(self.teacher_dim, self.teacher_dim // 2),
+            nn.ReLU(),
+            nn.Linear(self.teacher_dim // 2, 1),
+            nn.LeakyReLU()
+        )
+        self.gate_i = nn.Sequential(
+            nn.Linear(self.teacher_dim, self.teacher_dim // 2),
+            nn.ReLU(),
+            nn.Linear(self.teacher_dim // 2, 1),
+            nn.LeakyReLU()
+        )
+    
+    @torch.no_grad()
+    def _KNN(self, embs, K):
+        embs = pca(embs, 150)
+        topk_indices = knn(embs, embs, k=K+1)[1].reshape(-1, K + 1)
+        return topk_indices[:, 1:].cuda()
+    
+    def construct_knn_graph(self, all_embed, K, name):
+        f_graph = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"Graph_{name}_{K}.pkl")
+        sucflg, Graph = load_pkls(f_graph)
+        if sucflg: return Graph.cuda()
+        N = all_embed.shape[0]
+        nearestK = self._KNN(all_embed, K)
+        row = torch.arange(N).repeat(K, 1).T.reshape(-1).cuda()
+        col = nearestK.reshape(-1)
+        index = torch.stack([row, col])
+        data = torch.ones(index.size(-1)).cuda()
+        Graph = torch.sparse_coo_tensor(index, data, torch.Size([N, N]), dtype=torch.float)
+        Graph = (Graph + Graph.T) / 2
+        Graph = Graph.coalesce()
+        Graph = sym_norm_graph(Graph)
+        dump_pkls((Graph, f_graph))
+        return Graph.cuda()
+
+    def _dropout_graph(self, Graph):
+        size = Graph.size()
+        assert size[0] == size[1]
+        index = Graph.indices().t()
+        values = Graph.values()
+        random_index = torch.rand(len(values)) + self.keep_prob
+        random_index = random_index.int().bool()
+        index = index[random_index]
+        values = values[random_index] / self.keep_prob
+        droped_Graph = torch.sparse_coo_tensor(index.t(), values, size, dtype=torch.float)
+        return droped_Graph
+
+    def generate_filter(self, Adj, mode):
+        droped_Adj = self._dropout_graph(Adj)
+
+        if mode == "user":
+            alpha = self.gate_u(self.all_T_u).squeeze()
+        else:
+            alpha = self.gate_i(self.all_T_i).squeeze()
+        
+        torch.save(alpha.detach().cpu(), f"alpha_{mode}.pt")
+        rndS = alpha.detach() + random.random() * 1.0
+        rndT = alpha
+        self_loop_alpha_S = self_loop_graph(droped_Adj.shape[0], rndS).cuda()
+        self_loop_alpha_T = self_loop_graph(droped_Adj.shape[0], rndT).cuda()
+        self_loop_one = self_loop_graph(droped_Adj.shape[0]).cuda()
+        H_S = graph_mm(self_loop_alpha_S, droped_Adj) + self_loop_one - self_loop_alpha_S
+        H_T = graph_mm(self_loop_alpha_T, droped_Adj) + self_loop_one - self_loop_alpha_T
+        return H_S, H_T
+    
+    def freq_loss(self, batch_entity, all_S, all_T, GraphS, GraphT, projector):
+        S = graph_mm(GraphS, all_S)
+        T = graph_mm(GraphT, all_T)
+        T_feas = T[batch_entity]
+        S_feas = S[batch_entity]
+        S_feas = projector(S_feas)
+        if self.norm:
+            T_feas = F.normalize(T_feas, p=2, dim=-1)
+            S_feas = F.normalize(S_feas, p=2, dim=-1)
+            cos_theta = (T_feas * S_feas).sum(-1, keepdim=True)
+            G_diff = 1. - cos_theta
+        else:
+            G_diff = (T_feas - S_feas).pow(2).sum(-1)
+        loss = G_diff.sum()
+        return loss
+
+    def get_user_loss(self, batch_entity):
+        all_S = self.student.user_emb.weight
+        all_T = self.all_T_u
+        projector = self.projector_u
+        H_S_u, H_T_u = self.generate_filter(self.Graph_u, "user")
+        loss = self.freq_loss(batch_entity, all_S, all_T, H_S_u, H_T_u, projector)
+        return loss
+    
+    def get_item_loss(self, batch_entity):
+        all_T = self.all_T_i
+        all_S_id = self.student.item_emb.weight
+        H_S_i, H_T_i = self.generate_filter(self.Graph_i, "item")
+        loss = self.freq_loss(batch_entity, all_S_id, all_T, H_S_i, H_T_i, self.projector_i)
+        return loss
+
+    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+        batch_item = torch.cat([batch_pos_item.unique(), batch_neg_item.unique()]).unique()
+        loss_user = self.get_user_loss(batch_user.unique())
+        loss_item = self.get_item_loss(batch_item)
+        loss = loss_user + loss_item
+        return loss

@@ -11,7 +11,7 @@ from modules.dataset import load_cf_data, implicit_CF_dataset, implicit_CF_datas
 from modules.evaluation import Evaluator
 from modeling import backbone
 from modeling.KD.general import Scratch
-import modeling.KD.mm as KD
+import modeling.KD.cf as KD
 
 
 def main(args, teacher_args, student_args, logger):

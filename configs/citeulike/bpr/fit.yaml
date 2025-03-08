@@ -7,6 +7,6 @@ bpr:
   fit_norm: False
   fit_bias: False
   fit_linear: False
-  num_experts: 5
+  num_experts: 1
   dropout_rate: 0.2
-  hidden_dim_ratio: 1.0
+  hidden_dim_ratio: 5.0

@@ -114,6 +114,7 @@ python -u main.py --task=mm --dataset=clothing --S_backbone=bpr --model=scratch 
 python -u main.py --task=mm --dataset=baby --S_backbone=bpr --T_backbone=bm3 --model=fitnet
 python -u main.py --task=mm --dataset=baby --S_backbone=bpr --T_backbone=lgmrec --model=rrd
 python -u main.py --task=mm --dataset=baby --S_backbone=bpr --T_backbone=bm3 --model=freqmm
+python -u main.py --task=mm --dataset=baby --S_backbone=bpr --T_backbone=bm3 --model=adafreq
 python -u main.py --task=mm --dataset=baby --S_backbone=bpr --T_backbone=mgcn --model=freqmm
 python -u main.py --task=mm --dataset=baby --S_backbone=bpr --T_backbone=lgmrec --model=freqmm
 

@@ -32,11 +32,19 @@ def dump_pkls(*pkl_fnames):
         pickle.dump(pkl, open(fname, "wb"))
 
 
-def self_loop_graph(N):
+def self_loop_graph(N, values=None):
+    if values is None:
+        values = torch.ones(N, dtype=torch.float)
+    assert len(values) == N
+    values = values.cpu()
     self_loop_idx = torch.stack([torch.arange(N), torch.arange(N)], dim=0)
-    self_loop_data = torch.ones(self_loop_idx.size(1), dtype=torch.float)
-    Graph = torch.sparse_coo_tensor(self_loop_idx, self_loop_data, (N, N), dtype=torch.float)
+    Graph = torch.sparse_coo_tensor(self_loop_idx, values, (N, N), dtype=torch.float)
     return Graph.coalesce()
+
+
+def graph_mm(graph, X):
+        return torch.sparse.mm(graph, X)
+        # return torch.mm(graph.to_dense(), X)
 
 
 def pca(X:torch.tensor, n_components:int) -> torch.tensor:

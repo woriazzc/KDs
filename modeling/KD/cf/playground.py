@@ -10,9 +10,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..utils import Projector, pca, load_pkls, dump_pkls, self_loop_graph, sym_norm_graph
+from ..utils import Projector, graph_mm, pca, load_pkls, dump_pkls, self_loop_graph, sym_norm_graph
 from ..base_model import BaseKD4Rec
 from .baseline import DE
+from ..mm import IdealD
 
 
 class CPD(DE):
@@ -644,146 +645,6 @@ class FilterD(BaseKD4Rec):
 
         DE_loss = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
         return DE_loss
-
-
-class IdealD(BaseKD4Rec):
-    def __init__(self, args, teacher, student):
-        super().__init__(args, teacher, student)
-        self.model_name = "ideald"
-        self.filter_id = args.filter_id
-        self.norm = args.norm
-        self.K = args.ideald_K
-        self.dropout_rate = args.ideald_dropout_rate
-        self.hidden_dim_ratio = args.hidden_dim_ratio
-        
-        self.student_dim = self.student.embedding_dim
-        self.teacher_dim = self.teacher.embedding_dim
-        self.projector_u = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
-        self.projector_i = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
-        self.all_T_u, self.all_T_i = self.teacher.get_all_embedding()
-        Graph_u = self.construct_knn_graph(self.all_T_u, self.K, "user")
-        Graph_i = self.construct_knn_graph(self.all_T_i, self.K, "item")
-        U_user = self.eig_decompose(Graph_u, "user")
-        U_item = self.eig_decompose(Graph_i, "item")
-        self.anchor_filters_user = self.construct_anchor_filters(U_user)
-        self.anchor_filters_item = self.construct_anchor_filters(U_item)
-        if self.filter_id == -1:
-            self.filter_u = self_loop_graph(self.num_users).cuda()
-            self.filter_i = self_loop_graph(self.num_items).cuda()
-        else:
-            self.filter_u = self.anchor_filters_user[self.filter_id]
-            self.filter_i = self.anchor_filters_item[self.filter_id]
-        self.global_step = 0
-
-    @torch.no_grad()
-    def _KNN(self, embs, K):
-        embs = pca(embs, 150)
-        topk_indices = knn(embs, embs, k=K+1)[1].reshape(-1, K + 1)
-        return topk_indices[:, 1:].cuda()
-    
-    def construct_knn_graph(self, all_embed, K, name):
-        f_graph = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"Graph_{name}_{K}.pkl")
-        sucflg, Graph = load_pkls(f_graph)
-        if sucflg: return Graph.cuda()
-        N = all_embed.shape[0]
-        nearestK = self._KNN(all_embed, K)
-        row = torch.arange(N).repeat(K, 1).T.reshape(-1).cuda()
-        col = nearestK.reshape(-1)
-        index = torch.stack([row, col])
-        data = torch.ones(index.size(-1)).cuda()
-        Graph = torch.sparse_coo_tensor(index, data, torch.Size([N, N]), dtype=torch.float)
-        Graph = (Graph + Graph.T) / 2
-        Graph = Graph.coalesce()
-        Graph = sym_norm_graph(Graph)
-        dump_pkls((Graph, f_graph))
-        return Graph.cuda()
-    
-    def eig_decompose(self, Graph, name):
-        f_U = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"U_{name}.pkl")
-        sucflg, U = load_pkls(f_U)
-        if sucflg: return U.cuda()
-        U, S, V = torch.svd(Graph.to_dense())
-        U = U.real
-        dump_pkls((U, f_U))
-        return U.cuda()
-
-    def construct_anchor_filters(self, U):
-        anchor_filters = []
-        blk = math.ceil(U.shape[1] / 4)
-        for i in range(4):
-            vectors = U[:, blk * i:blk * (i + 1)]
-            filter = vectors.mm(vectors.t())
-            anchor_filters.append(filter.cuda())
-        return anchor_filters
-
-    def get_features(self, batch_entity, is_user):
-        if is_user:
-            T = self.all_T_u
-            S = self.student.user_emb.weight
-            proj = self.projector_u
-            Graph = self.filter_u
-        else:
-            T = self.all_T_i
-            S = self.student.item_emb.weight
-            proj = self.projector_u
-            Graph = self.filter_i
-        SP = proj(S)
-        filtered_S = torch.sparse.mm(Graph, SP)
-        filtered_T = torch.sparse.mm(Graph, T)
-        filtered_T = filtered_T[batch_entity]
-        filtered_S = filtered_S[batch_entity]
-        if self.norm:
-            filtered_S = F.normalize(filtered_S, p=2, dim=-1)
-            filtered_T = F.normalize(filtered_T, p=2, dim=-1)
-        return filtered_T, filtered_S
-    
-    def get_DE_loss(self, batch_entity, is_user):
-        T_feas, S_feas = self.get_features(batch_entity, is_user)
-        if self.norm:
-            G_diff = 1. - (T_feas * S_feas).sum(-1, keepdim=True)
-        else:
-            G_diff = (T_feas - S_feas).pow(2).sum(-1)
-        loss = G_diff.sum()
-        return loss
-    
-    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
-        batch_item = torch.cat([batch_pos_item.unique(), batch_neg_item.unique()]).unique()
-        loss_user = self.get_DE_loss(batch_user, True)
-        loss_item = self.get_DE_loss(batch_item, False)
-        loss = loss_user + loss_item
-        self.log_anchor_loss(batch_user, True)
-        return loss
-
-    @torch.no_grad()
-    def log_anchor_loss(self, batch_entity, is_user):
-        if is_user:
-            T = self.all_T_u
-            S = self.student.user_emb.weight
-            proj = self.projector_u
-            anchor_filters = self.anchor_filters_user
-        else:
-            T = self.all_T_i
-            S = self.student.item_emb.weight
-            proj = self.projector_i
-            anchor_filters = self.anchor_filters_item
-        for idx, filter in enumerate(anchor_filters):
-            filtered_S = torch.sparse.mm(filter, S)
-            filtered_T = torch.sparse.mm(filter, T)
-            filtered_T = filtered_T[batch_entity]
-            filtered_S = filtered_S[batch_entity]
-            training = proj.training
-            proj.eval()
-            filtered_SP = proj(filtered_S)
-            proj.train(training)
-            if self.norm:
-                filtered_SP = F.normalize(filtered_SP, p=2, dim=-1)
-                filtered_T = F.normalize(filtered_T, p=2, dim=-1)
-                G_diff = 1. - (filtered_T * filtered_SP).sum(-1, keepdim=True)
-            else:
-                G_diff = (filtered_T - filtered_SP).pow(2).sum(-1) / 2
-            loss = G_diff.sum()
-            mlflow.log_metrics({f"anchor_loss_{idx}": (loss / batch_entity.shape[0]).cpu().item()}, step=self.global_step)
-        self.global_step += 1
 
 
 class KNND(GraphD):
@@ -1607,181 +1468,126 @@ class MRRD(BaseKD4Rec):
         return loss
 
 
-class TKD(BaseKD4Rec):
+class AdaFreq(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
-        self.model_name = "tkd"
-        self.verbose = args.verbose
-        self.beta = args.tkd_beta
-        self.tau = args.tkd_tau
-        self.K = args.tkd_K
-        self.wa = args.tkd_wa
-        self.T_topk_dict = self.get_topk_dict(self.teacher)
-        self.num_experts = args.num_experts
-        self.dropout_rate = args.dropout_rate
-        self.sigma = args.tkd_sigma
-        self.warmup = args.tkd_warmup
-        self.user_list = torch.LongTensor([i for i in range(self.num_users)]).cuda()
-        self.item_list = torch.LongTensor([i for i in range(self.num_items)]).cuda()
+        self.model_name = "adafreq"
+        self.norm = args.norm
+        self.K = args.adafreq_K
+        self.keep_prob = args.adafreq_keep_prob
+        self.dropout_rate = args.adafreq_dropout_rate
+        self.hidden_dim_ratio = args.hidden_dim_ratio
+        
         self.student_dim = self.student.embedding_dim
         self.teacher_dim = self.teacher.embedding_dim
-        self.projector_u = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=False, dropout_rate=self.dropout_rate)
-        self.projector_i = Projector(self.student_dim, self.teacher_dim, self.num_experts, norm=False, dropout_rate=self.dropout_rate)
 
-    def get_topk_dict(self, model):
-        print('Generating Top-K dict...')
-        with torch.no_grad():
-            inter_mat = model.get_all_ratings()
-            _, topk_dict = torch.topk(inter_mat, self.K, dim=-1)
-        return topk_dict.type(torch.LongTensor).cuda()  # Nu, K
+        self.all_T_u, self.all_T_i = self.teacher.get_all_embedding()
+        
+        self.projector_u = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
+        self.projector_i = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
+        self.Graph_u = self.construct_knn_graph(self.all_T_u, self.K, "user")
+        self.Graph_i = self.construct_knn_graph(self.all_T_i, self.K, "item")
+        self.gate_u = nn.Sequential(
+            nn.Linear(self.teacher_dim, self.teacher_dim // 2),
+            nn.ReLU(),
+            nn.Linear(self.teacher_dim // 2, 1),
+            nn.LeakyReLU()
+        )
+        self.gate_i = nn.Sequential(
+            nn.Linear(self.teacher_dim, self.teacher_dim // 2),
+            nn.ReLU(),
+            nn.Linear(self.teacher_dim // 2, 1),
+            nn.LeakyReLU()
+        )
     
-    def do_something_in_each_epoch(self, epoch):
-        self.S_topk_dict = self.get_topk_dict(self.student)
-        if epoch < self.warmup:
-            self.mask_all = torch.ones((self.num_users, 2 * self.K)).cuda().float()
+    @torch.no_grad()
+    def _KNN(self, embs, K):
+        embs = pca(embs, 150)
+        topk_indices = knn(embs, embs, k=K+1)[1].reshape(-1, K + 1)
+        return topk_indices[:, 1:].cuda()
+    
+    def construct_knn_graph(self, all_embed, K, name):
+        f_graph = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"Graph_{name}_{K}.pkl")
+        sucflg, Graph = load_pkls(f_graph)
+        if sucflg: return Graph.cuda()
+        N = all_embed.shape[0]
+        nearestK = self._KNN(all_embed, K)
+        row = torch.arange(N).repeat(K, 1).T.reshape(-1).cuda()
+        col = nearestK.reshape(-1)
+        index = torch.stack([row, col])
+        data = torch.ones(index.size(-1)).cuda()
+        Graph = torch.sparse_coo_tensor(index, data, torch.Size([N, N]), dtype=torch.float)
+        Graph = (Graph + Graph.T) / 2
+        Graph = Graph.coalesce()
+        Graph = sym_norm_graph(Graph)
+        dump_pkls((Graph, f_graph))
+        return Graph.cuda()
+
+    def _dropout_graph(self, Graph):
+        size = Graph.size()
+        assert size[0] == size[1]
+        index = Graph.indices().t()
+        values = Graph.values()
+        random_index = torch.rand(len(values)) + self.keep_prob
+        random_index = random_index.int().bool()
+        index = index[random_index]
+        values = values[random_index] / self.keep_prob
+        droped_Graph = torch.sparse_coo_tensor(index.t(), values, size, dtype=torch.float)
+        return droped_Graph
+
+    def generate_filter(self, Adj, mode):
+        droped_Adj = self._dropout_graph(Adj)
+        if mode == "user":
+            alpha = self.gate_u(self.all_T_u).squeeze()
         else:
-            with torch.no_grad():
-                top_dict = torch.cat([self.S_topk_dict, self.T_topk_dict], dim=-1)
-                users = self.student.get_user_embedding(self.user_list) # Nu, Sdim
-                items = self.student.get_item_embedding(self.item_list) # Ni, Sdim
-                proj_users = self.projector_u(users)    # Nu, Tdim
-                proj_items = self.projector_i(items)    # Ni, Tdim
-                scores = users.mm(items.T)
-                proj_scores = proj_users.mm(proj_items.T)
-                scores = scores[self.user_list.unsqueeze(-1), top_dict]
-                proj_scores = proj_scores[self.user_list.unsqueeze(-1), top_dict]
-                rk = torch.sort(torch.sort(scores, dim=1, descending=True)[1], dim=1)[1]
-                proj_rk = torch.sort(torch.sort(proj_scores, dim=1, descending=True)[1], dim=1)[1]
-                self.mask_all = torch.exp(-(rk - proj_rk).pow(2) / self.sigma)  # Nu, 2K
-                
-    def get_features(self, batch_entity, is_user):
-        if is_user:
-            s = self.student.get_user_embedding(batch_entity)
-            t = self.teacher.get_user_embedding(batch_entity)
-            s_proj = self.projector_u(s)
+            alpha = self.gate_i(self.all_T_i).squeeze()
+        
+        torch.save(alpha.detach().cpu(), f"alpha_{mode}.pt")
+        rndS = alpha.detach() + random.random() * 1.0
+        # rndS = torch.rand_like(alpha.detach()) * alpha.detach()
+        rndT = alpha
+        # rndS = rndT = torch.zeros_like(alpha)
+        self_loop_alpha_S = self_loop_graph(droped_Adj.shape[0], rndS).cuda()
+        self_loop_alpha_T = self_loop_graph(droped_Adj.shape[0], rndT).cuda()
+        self_loop_one = self_loop_graph(droped_Adj.shape[0]).cuda()
+        H_S = graph_mm(self_loop_alpha_S, droped_Adj) + self_loop_one - self_loop_alpha_S
+        H_T = graph_mm(self_loop_alpha_T, droped_Adj) + self_loop_one - self_loop_alpha_T
+        return H_S, H_T
+    
+    def freq_loss(self, batch_entity, all_S, all_T, GraphS, GraphT, projector):
+        S = graph_mm(GraphS, all_S)
+        T = graph_mm(GraphT, all_T)
+        T_feas = T[batch_entity]
+        S_feas = S[batch_entity]
+        S_feas = projector(S_feas)
+        if self.norm:
+            T_feas = F.normalize(T_feas, p=2, dim=-1)
+            S_feas = F.normalize(S_feas, p=2, dim=-1)
+            cos_theta = (T_feas * S_feas).sum(-1, keepdim=True)
+            G_diff = 1. - cos_theta
         else:
-            s = self.student.get_item_embedding(batch_entity)
-            t = self.teacher.get_item_embedding(batch_entity)
-            s_proj = self.projector_i(s)
-        return t, s, s_proj
-    
-    def DE_loss(self, batch_entity, is_user):
-        T_feas, S_feas, S_proj_feas = self.get_features(batch_entity, is_user)
-        G_diff = (T_feas - S_proj_feas).pow(2).sum(-1)
-        DE_loss = G_diff.sum()
-        return DE_loss
-    
-    def feature_loss(self, size):
-        u = torch.LongTensor(np.random.choice(np.array([i for i in range(self.num_users)]), size, replace=False)).cuda()
-        i = torch.LongTensor(np.random.choice(np.array([i for i in range(self.num_items)]), size, replace=False)).cuda()
-        DE_loss_user = self.DE_loss(u, True)
-        DE_loss_item = self.DE_loss(i, False)
-        DE_loss = DE_loss_user + DE_loss_item
-        return DE_loss
-    
-    def ce_loss(self, logit_T, logit_S, weight=None):
-        prob_T = torch.softmax(logit_T / self.tau, dim=-1)
-        prob_S = torch.softmax(logit_S / self.tau, dim=-1)
-        loss = -prob_T * torch.log(prob_S)
-        if weight is not None:
-            loss *= weight
-        loss = loss.sum()
+            G_diff = (T_feas - S_feas).pow(2).sum(-1)
+        loss = G_diff.sum()
+        return loss
+
+    def get_user_loss(self, batch_entity):
+        all_S = self.student.user_emb.weight
+        all_T = self.all_T_u
+        projector = self.projector_u
+        H_S_u, H_T_u = self.generate_filter(self.Graph_u, "user")
+        loss = self.freq_loss(batch_entity, all_S, all_T, H_S_u, H_T_u, projector)
         return loss
     
-    def logit_loss(self, batch_users):
-        itemS = self.S_topk_dict[batch_users]
-        itemT = self.T_topk_dict[batch_users]
-        item_all = torch.cat([itemS, itemT], -1)
-        logit_T_itemS = self.teacher.forward_multi_items(batch_users, itemS)
-        logit_S_itemS = self.student.forward_multi_items(batch_users, itemS)
-        loss_itemS = self.ce_loss(logit_T_itemS, logit_S_itemS)
-
-        logit_T_all = self.teacher.forward_multi_items(batch_users, item_all)
-        logit_S_all = self.student.forward_multi_items(batch_users, item_all)
-        mask_all = self.mask_all[batch_users]   # bs, 2K
-        if self.verbose:
-            mlflow.log_metric("mask_all", mask_all.mean())
-        loss_all = self.ce_loss(logit_T_all, logit_S_all, weight=mask_all)
-
-        loss = (1. - self.wa) * loss_itemS + self.wa * loss_all
+    def get_item_loss(self, batch_entity):
+        all_T = self.all_T_i
+        all_S_id = self.student.item_emb.weight
+        H_S_i, H_T_i = self.generate_filter(self.Graph_i, "item")
+        loss = self.freq_loss(batch_entity, all_S_id, all_T, H_S_i, H_T_i, self.projector_i)
         return loss
-    
-    def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
-        logit_loss = self.logit_loss(batch_users)
-        feature_loss = self.feature_loss(len(batch_users))
-        loss = (1. - self.beta) * logit_loss + self.beta * feature_loss
-        return loss
-
-
-class rndD(BaseKD4Rec):
-    def __init__(self, args, teacher, student):
-        super().__init__(args, teacher, student)
-        self.model_name = "rndd"
-        self.sigma = args.rndd_sigma
-        self.dropout_rate = args.dropout_rate
-        self.student_dim = self.student.embedding_dim
-        self.teacher_dim = self.teacher.embedding_dim
-        self.projector_u = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate)
-        self.projector_i = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate)
-
-    def get_features(self, batch_entity, is_user):
-        if is_user:
-            s = self.student.get_user_embedding(batch_entity)
-            t = self.teacher.get_user_embedding(batch_entity)
-            noise = torch.randn_like(s) * self.sigma
-            s_proj = self.projector_u(s + noise)
-        else:
-            s = self.student.get_item_embedding(batch_entity)
-            t = self.teacher.get_item_embedding(batch_entity)
-            noise = torch.randn_like(s) * self.sigma
-            s_proj = self.projector_i(s + noise)
-        return t, s_proj
-    
-    def get_DE_loss(self, batch_entity, is_user):
-        T_feas, S_feas = self.get_features(batch_entity, is_user)
-        G_diff = (T_feas - S_feas).pow(2).sum(-1)
-        DE_loss = G_diff.sum()
-        return DE_loss
 
     def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
-        u = torch.LongTensor(np.random.choice(np.array([i for i in range(self.num_users)]), len(batch_user), replace=False)).cuda()
-        i = torch.LongTensor(np.random.choice(np.array([i for i in range(self.num_items)]), len(batch_user), replace=False)).cuda()
-        DE_loss_user = self.get_DE_loss(u, True)
-        DE_loss_item = self.get_DE_loss(i, False)
-        DE_loss = DE_loss_user + DE_loss_item
-        return DE_loss
-
-
-class CKD(BaseKD4Rec):
-    def __init__(self, args, teacher, student):
-        super().__init__(args, teacher, student)
-        self.model_name = "ckd"
-        self.tau = args.ckd_tau
-        self.K = args.ckd_K
-        self.guide = args.ckd_guide
-        self.init_ratio = args.ckd_init
-        self.final_ratio = args.ckd_final
-        self.grouth = args.ckd_grouth
-        self.ratio = self.init_ratio
-        if self.guide == "teacher":
-            self.topk_dict = self.get_topk_dict(self.teacher)
-
-    def get_topk_dict(self, model):
-        print('Generating Top-K dict...')
-        with torch.no_grad():
-            inter_mat = model.get_all_ratings()
-            _, topk_dict = torch.topk(inter_mat, self.K, dim=-1)
-        return topk_dict.type(torch.LongTensor).cuda()
-    
-    def do_something_in_each_epoch(self, epoch):
-        if self.guide == "student":
-            self.topk_dict = self.get_topk_dict(self.student)
-        self.ratio = self.init_ratio + (self.final_ratio - self.init_ratio) * min(1, epoch / self.grouth)
-    
-    def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
-        logit_T = self.teacher.forward_multi_items(batch_users, self.topk_dict[batch_users])
-        logit_S = self.student.forward_multi_items(batch_users, self.topk_dict[batch_users])
-        prob_T = torch.softmax(logit_T / self.tau, dim=-1)
-        loss = F.cross_entropy(logit_S / self.tau, prob_T, reduction='none')
-        loss = loss[loss.argsort(descending=True)[:math.ceil(self.ratio * len(loss))]].sum() / self.ratio
+        batch_item = torch.cat([batch_pos_item.unique(), batch_neg_item.unique()]).unique()
+        loss_user = self.get_user_loss(batch_user.unique())
+        loss_item = self.get_item_loss(batch_item)
+        loss = loss_user + loss_item
         return loss

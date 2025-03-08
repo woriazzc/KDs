@@ -1,0 +1,11 @@
+bpr:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-7
+  lmbda: 0.05
+  norm: False
+  adafreq_K: 5
+  adafreq_keep_prob: 0.7
+  adafreq_dropout_rate: 0.2
+  hidden_dim_ratio: 5
