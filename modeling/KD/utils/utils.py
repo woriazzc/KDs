@@ -1,9 +1,12 @@
 import os
+import yaml
 import pickle
 import random
 import mlflow
 import numpy as np
 import scipy.linalg
+import scipy.sparse as sp
+from scipy.sparse import csr_matrix
 from sklearn.decomposition import PCA
 from sklearn.gaussian_process.kernels import  RBF 
 
@@ -55,12 +58,12 @@ def pca(X:torch.tensor, n_components:int) -> torch.tensor:
     return reduced_X
 
 
-def frequency(Adj:torch.sparse_coo_tensor, X:torch.Tensor):
+def frequency(Adj:torch.sparse_coo_tensor, X:torch.Tensor, k:int=200):
     """ X: shape (|V|, d)
     """
     # U, S, V = torch.svd_lowrank(Adj, q=k, niter=30)
-    S_low, U_low = torch.lobpcg(Adj, k=200, largest=True)
-    S_high, U_high = torch.lobpcg(Adj, k=200, largest=False)
+    S_low, U_low = torch.lobpcg(Adj, k=k, largest=True)
+    S_high, U_high = torch.lobpcg(Adj, k=k, largest=False)
     S = torch.cat([S_low, S_high])
     U = torch.cat([U_low, U_high], dim=-1)  # (|V|, 2k)
     freq = X.T.mm(U)  # (d, 2k)
@@ -379,3 +382,80 @@ def sym_norm_graph(Graph):
     Graph = torch.sparse_coo_tensor(index.t(), data, shape, dtype=torch.float)
     Graph = Graph.coalesce()
     return Graph
+
+
+def convert_sp_mat_to_sp_tensor(X):
+    coo = X.tocoo().astype(np.float32)
+    row = torch.Tensor(coo.row).long()
+    col = torch.Tensor(coo.col).long()
+    index = torch.stack([row, col])
+    data = torch.FloatTensor(coo.data)
+    return torch.sparse_coo_tensor(index, data, torch.Size(coo.shape), dtype=torch.float32)
+
+
+class BipartitleGraph:
+    def __init__(self, args, dataset):
+        self.graph = self.construct_graph(args, dataset)
+        indices = torch.arange(dataset.num_users).long().cuda()
+        self.R = self.graph.index_select(dim=0, index=indices)
+        indices = torch.arange(dataset.num_items).long().cuda() + dataset.num_users
+        self.R = self.R.index_select(dim=1, index=indices)
+        
+    def construct_graph(self, args, dataset):
+        f_Graph = os.path.join("modeling", "backbone", "crafts", args.dataset, f"Graph.pkl")
+        sucflg, Graph = load_pkls(f_Graph)
+        if sucflg:
+            return Graph.cuda()
+        
+        config = yaml.load(open(os.path.join(args.DATA_DIR, args.dataset, 'config.yaml'), 'r'), Loader=yaml.FullLoader)
+        if "large" in config and config["large"] == True:
+            Graph = self._construct_large_graph(dataset)
+        else:
+            Graph = self._construct_small_graph(dataset)
+        dump_pkls((Graph, f_Graph))
+        return Graph.cuda()
+    
+    def _construct_small_graph(self, dataset):
+        user_dim = torch.LongTensor(dataset.train_pairs[:, 0].cpu())
+        item_dim = torch.LongTensor(dataset.train_pairs[:, 1].cpu())
+
+        first_sub = torch.stack([user_dim, item_dim + dataset.num_users])
+        second_sub = torch.stack([item_dim + dataset.num_users, user_dim])
+        index = torch.cat([first_sub, second_sub], dim=1)
+        data = torch.ones(index.size(-1)).int()
+        Graph = torch.sparse_coo_tensor(index, data,
+                                            torch.Size([dataset.num_users + dataset.num_items, dataset.num_users + dataset.num_items]), dtype=torch.int)
+        dense = Graph.to_dense()
+        D = torch.sum(dense, dim=1).float()
+        D[D == 0.] = 1.
+        D_sqrt = torch.sqrt(D).unsqueeze(dim=0)
+        dense = dense / D_sqrt
+        dense = dense / D_sqrt.t()
+        index = dense.nonzero(as_tuple=False)
+        data = dense[dense >= 1e-9]
+        assert len(index) == len(data)
+        Graph = torch.sparse_coo_tensor(index.t(), data, torch.Size(
+            [dataset.num_users + dataset.num_items, dataset.num_users + dataset.num_items]), dtype=torch.float)
+        Graph = Graph.coalesce()
+        return Graph
+
+    def _construct_large_graph(self, dataset):
+        adj_mat = sp.dok_matrix((dataset.num_users + dataset.num_items, dataset.num_users + dataset.num_items), dtype=np.float32)
+        adj_mat = adj_mat.tolil()
+        train_pairs = dataset.train_pairs.numpy()
+        UserItemNet  = csr_matrix((np.ones(len(train_pairs)), (train_pairs[:, 0], train_pairs[:, 1])), shape=(dataset.num_users, dataset.num_items))
+        R = UserItemNet.tolil()
+        adj_mat[:dataset.num_users, dataset.num_users:] = R
+        adj_mat[dataset.num_users:, :dataset.num_users] = R.T
+        adj_mat = adj_mat.todok()
+        rowsum = np.array(adj_mat.sum(axis=1))
+        d_inv = np.power(rowsum, -0.5).flatten()
+        d_inv[np.isinf(d_inv)] = 0.
+        d_mat = sp.diags(d_inv)
+        
+        norm_adj = d_mat.dot(adj_mat)
+        norm_adj = norm_adj.dot(d_mat)
+        norm_adj = norm_adj.tocsr()
+        Graph = convert_sp_mat_to_sp_tensor(norm_adj)
+        Graph = Graph.coalesce()
+        return Graph

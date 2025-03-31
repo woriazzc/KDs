@@ -1,0 +1,29 @@
+# bpr:
+#   epochs: 1000
+#   batch_size: 2048
+#   lr: 1.e-3
+#   wd: 1.e-5
+#   lmbda: 0.1
+#   propd_tau: 1
+#   propd_rat: 1
+#   propd_K: 100
+#   propd_alpha: 0.9
+#   propd_beta: 0
+#   blind: True
+#   propd_T: 10
+#   propd_scale: 3
+#   propd_bias: 5
+bpr:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-3
+  lmbda: 0.05
+  propd_tau: 1
+  propd_rat: 2
+  propd_K: 100
+  propd_alpha: 0.7
+  blind: False
+  propd_T: 10
+  propd_scale: 3
+  propd_bias: 5

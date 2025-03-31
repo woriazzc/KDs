@@ -1,6 +1,7 @@
 import os
 import re
 import yaml
+import math
 import pickle
 import numpy as np
 import pandas as pd
@@ -161,7 +162,43 @@ class implicit_CF_dataset(data.Dataset):
     
     def __getitem__(self, idx):
         return self.users[idx], self.pos_items[idx], self.neg_items[idx]
-        
+
+
+def split_implicit_CF_dataset(dataset_fa:implicit_CF_dataset, ratio:float=0.9):
+    train_dict_son = {}
+    train_dict_fa = dataset_fa.train_dict
+    train_list_son = []
+    for u in train_dict_fa:
+        train_dict_son[u] = []
+        items_fa = train_dict_fa[u]
+        count_son = math.ceil(len(items_fa) * ratio)
+        for idx in range(count_son):
+            train_dict_son[u].append(train_dict_fa[u][idx])
+            train_list_son.append([u, train_dict_fa[u][idx]])
+        train_dict_son[u] = torch.LongTensor(train_dict_son[u])
+    train_pair_son = torch.LongTensor(train_list_son)
+    # Define train_matrix with sparse matrix
+    index = train_pair_son.t()
+    data = torch.ones(index.size(-1)).int()
+    train_matrix_son = torch.sparse_coo_tensor(index, data,
+                                        torch.Size([dataset_fa.num_users, dataset_fa.num_items]), dtype=torch.int)
+    train_user_pop_son = torch.sparse.sum(train_matrix_son, dim=1).to_dense()
+    train_item_pop_son = torch.sparse.sum(train_matrix_son, dim=0).to_dense()
+    dataset_son = implicit_CF_dataset(
+        dataset_fa.dataset,
+        dataset_fa.num_users,
+        dataset_fa.num_items,
+        train_pair_son,
+        train_matrix_son,
+        train_dict_son,
+        train_user_pop_son,
+        train_item_pop_son,
+        dataset_fa.num_ns,
+        dataset_fa.neg_sampling_on_all,
+        dataset_fa.no_neg_sampling
+    )
+    return dataset_son
+
 
 class implicit_SR_dataset(data.Dataset):
     def __init__(self, CF_dataset: implicit_CF_dataset, max_sequence_len):

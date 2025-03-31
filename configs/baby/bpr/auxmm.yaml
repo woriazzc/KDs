@@ -1,0 +1,28 @@
+bm3:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-7
+  lmbda: 0.1
+  auxmm_K: 5
+  auxmm_keep_prob: 0.3
+  auxmm_dropout_rate: 0.5
+  hidden_dim_ratio: 1
+  auxmm_interval: 2
+  aux_lr: 1.e-4
+  main_ratio: 0.9
+lgmrec:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-5
+  lmbda: 0.01
+  auxmm_K: 5
+  auxmm_alpha: 0.3
+  auxmm_keep_prob: 0.3
+  auxmm_dropout_rate: 0.5
+  hidden_dim_ratio: 1
+  auxmm_interval: 10
+  aux_lr: 1.e-4
+  main_ratio: 0.9
+  auxmm_L: 1

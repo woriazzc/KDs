@@ -11,3 +11,27 @@ bm3:
   freqmm_keep_prob: 0.3
   freqmm_dropout_rate: 0.2
   hidden_dim_ratio: 5
+# lgmrec:
+#   epochs: 1000
+#   batch_size: 2048
+#   lr: 1.e-3
+#   wd: 1.e-3
+#   lmbda: 0.1
+#   norm: True
+#   freqmm_K: 5
+#   freqmm_alpha: 0.7
+#   freqmm_keep_prob: 0.7
+#   freqmm_dropout_rate: 0.5
+#   hidden_dim_ratio: 5
+lgmrec:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-5
+  lmbda: 0.05
+  norm: False
+  freqmm_K: 5
+  freqmm_alpha: 0.7
+  freqmm_keep_prob: 0.7
+  freqmm_dropout_rate: 0.5
+  hidden_dim_ratio: 5

@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from ..utils import Projector, graph_mm, pca, load_pkls, dump_pkls, self_loop_graph, sym_norm_graph
+from ..utils import Projector, graph_mm, pca, load_pkls, dump_pkls, self_loop_graph, sym_norm_graph, BipartitleGraph
 from ..base_model import BaseKD4Rec
 from .baseline import DE
 from ..mm import IdealD
@@ -1406,7 +1406,7 @@ class MRRD(BaseKD4Rec):
         if self.sample_rank:
             ranking_list = -(torch.arange(self.mxK) + 1) / self.T
             ranking_mat = ranking_list.repeat(len(T), 1).cuda()
-            prob_T = torch.softmax(ranking_mat, dim=-1)     # bs, mxK
+            prob_T = torch.softmax(ranking_mat / self.tau, dim=-1)     # bs, mxK
         else:
             prob_T = torch.softmax(T / self.tau, dim=-1)
         loss = F.cross_entropy(S / self.tau, prob_T, reduction='sum')
@@ -1591,3 +1591,167 @@ class AdaFreq(BaseKD4Rec):
         loss_item = self.get_item_loss(batch_item)
         loss = loss_user + loss_item
         return loss
+
+
+class BlackD(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "blackd"
+        self.tau = args.blackd_tau
+        self.K = args.blackd_K
+        self.T = args.blackd_T
+        self.blind = args.blind
+        self.T_topk_scores, self.T_topk_items = self.get_topk_dict(self.teacher, self.K)
+        if self.blind:
+            self.T_topk_scores = -(torch.arange(self.K) + 1) / self.T
+            self.T_topk_scores = self.T_topk_scores.repeat(self.num_users, 1).cuda()
+        
+    def get_topk_dict(self, model, mxK):
+        print('Generating Top-K dict...')
+        with torch.no_grad():
+            inter_mat = model.get_all_ratings()
+            train_pairs = self.dataset.train_pairs
+            # remove true interactions from topk_dict
+            inter_mat[train_pairs[:, 0], train_pairs[:, 1]] = -1e6
+            topk_scores, topk_dict = torch.topk(inter_mat, mxK, dim=-1)
+        return topk_scores.cuda(), topk_dict.cuda()
+    
+    def get_loss(self, *params):
+        batch_users = params[0]
+        batch_users = batch_users.unique()
+        top_items = self.T_topk_items[batch_users]
+        T_logits = self.T_topk_scores[batch_users]
+        S_logits = self.student.forward_multi_items(batch_users, top_items)
+        T_probs = torch.softmax(T_logits / self.tau, dim=-1)
+        loss = F.cross_entropy(S_logits / self.tau, T_probs, reduction='sum')
+        return loss
+
+
+class PropD(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "propd"
+        self.tau = args.propd_tau
+        self.rat = args.propd_rat
+        self.alpha = args.propd_alpha
+        self.K = args.propd_K
+        self.blind = args.blind
+        self.T = args.propd_T
+        self.scale = args.propd_scale
+        self.bias = args.propd_bias
+        if self.blind:
+            # self.T_topk_scores = torch.ones_like(self.T_topk_scores)
+            self.T_topk_scores = -(torch.arange(self.K) + 1) / self.T
+            self.T_topk_scores = self.scale * torch.exp(self.T_topk_scores) + self.bias
+            self.T_topk_scores = self.T_topk_scores.repeat(self.num_users, 1).cuda()
+        else:
+            self.T_topk_scores, self.T_topk_items = self.get_topk_dict(self.teacher, self.K)
+        self.prop_T_topk_scores, self.prop_T_topk_items = self.label_propagate(self.T_topk_scores, self.T_topk_items)
+
+    def get_topk_dict(self, model, mxK):
+        print('Generating Top-K dict...')
+        with torch.no_grad():
+            inter_mat = model.get_all_ratings()
+            train_pairs = self.dataset.train_pairs
+            # remove true interactions from topk_dict
+            inter_mat[train_pairs[:, 0], train_pairs[:, 1]] = -1e6
+            topk_scores, topk_dict = torch.topk(inter_mat, mxK, dim=-1)
+        return topk_scores.cuda(), topk_dict.cuda()
+    
+    def label_propagate(self, T_topk_scores, T_topk_items):
+        # f_prop_top_scores = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"prop_top_scores_{self.rat}_{self.K}_{self.alpha}_{self.blind}.pkl")
+        # f_prop_top_items = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"prop_top_items_{self.rat}_{self.K}_{self.alpha}_{self.blind}.pkl")
+        # succ, prop_top_scores, prop_top_items = load_pkls(f_prop_top_scores, f_prop_top_items)
+        # if succ:
+        #     return prop_top_scores.cuda(), prop_top_items.cuda()
+
+        # R = BipartitleGraph(args, self.student.dataset).R
+        R = self.student.dataset.train_mat.float().cuda()
+        item_co_graph = torch.sparse.mm(R.T, R)
+        item_co_graph = sym_norm_graph(item_co_graph).cuda()
+        users = torch.arange(self.num_users).repeat(self.K, 1).T.cuda()
+        index = torch.stack([users.flatten(), T_topk_items.flatten()], dim=0)
+        data = T_topk_scores.flatten()
+        labels = torch.sparse_coo_tensor(index, data, torch.Size(
+            [self.num_users, self.num_items]), dtype=torch.float)
+        labels = labels.coalesce().T.cuda()
+        prop_top_scores, prop_top_items = [], []
+        bs = 32
+        for i in range(math.ceil(self.num_users / bs)):
+            user = torch.arange(bs * i, min(bs * (i + 1), self.num_users)).long().cuda()
+            labels_b = labels.index_select(dim=1, index=user).to_dense()    # |I|, bs
+            prop_labels_b = torch.sparse.mm(item_co_graph, labels_b)
+            prop_labels_b = self.alpha * labels_b + (1. - self.alpha) * prop_labels_b   # |I|, bs
+            prop_top_items.append(T_topk_items[user])
+            prop_top_scores.append(prop_labels_b.T[torch.arange(len(user)).unsqueeze(1).cuda(), T_topk_items[user]])
+        prop_top_scores = torch.cat(prop_top_scores, dim=0)
+        prop_top_items = torch.cat(prop_top_items, dim=0)
+        # dump_pkls((prop_top_scores.cpu(), f_prop_top_scores), (prop_top_items.cpu(), f_prop_top_items))
+        return prop_top_scores, prop_top_items
+
+    def get_loss(self, *params):
+        batch_users = params[0]
+        batch_users = batch_users.unique()
+        top_items_pre = self.prop_T_topk_items[batch_users][:, :self.K]
+        T_logits_pre = self.prop_T_topk_scores[batch_users][:, :self.K]
+        S_logits_pre = self.student.forward_multi_items(batch_users, top_items_pre)
+        T_probs_pre = torch.softmax(T_logits_pre / self.tau, dim=-1)
+        loss = F.cross_entropy(S_logits_pre / self.tau, T_probs_pre, reduction='sum')
+        return loss
+
+
+class OneD(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "oned"
+        self.tau = args.oned_tau
+        self.alpha = args.oned_alpha
+        self.K = args.oned_K
+        self.T_topk_scores, self.T_topk_items = self.get_topk_dict(self.teacher, self.K)
+        self.T_topk_scores = torch.ones_like(self.T_topk_scores)
+        self.prop_T_topk_scores, self.prop_T_topk_items = self.label_propagate(self.T_topk_scores, self.T_topk_items)
+
+    def get_topk_dict(self, model, mxK):
+        print('Generating Top-K dict...')
+        with torch.no_grad():
+            inter_mat = model.get_all_ratings()
+            train_pairs = self.dataset.train_pairs
+            # remove true interactions from topk_dict
+            inter_mat[train_pairs[:, 0], train_pairs[:, 1]] = -1e6
+            topk_scores, topk_dict = torch.topk(inter_mat, mxK, dim=-1)
+        return topk_scores.cuda(), topk_dict.cuda()
+    
+    def label_propagate(self, T_topk_scores, T_topk_items):
+        R = self.student.dataset.train_mat.float().cuda()
+        item_co_graph = torch.sparse.mm(R.T, R)
+        item_co_graph = sym_norm_graph(item_co_graph).cuda()
+        users = torch.arange(self.num_users).repeat(self.K, 1).T.cuda()
+        index = torch.stack([users.flatten(), T_topk_items.flatten()], dim=0)
+        data = T_topk_scores.flatten()
+        labels = torch.sparse_coo_tensor(index, data, torch.Size(
+            [self.num_users, self.num_items]), dtype=torch.float)
+        labels = labels.coalesce().T.cuda()
+        S_lowest, U_lowest = torch.lobpcg(item_co_graph, k=1, largest=True)   # |I|, 1
+        prop_top_scores, prop_top_items = [], []
+        bs = 32
+        for i in range(math.ceil(self.num_users / bs)):
+            user = torch.arange(bs * i, min(bs * (i + 1), self.num_users)).long().cuda()
+            labels_b = labels.index_select(dim=1, index=user).to_dense()    # |I|, bs
+            prop_labels_b = labels_b + self.alpha * U_lowest.mm(U_lowest.T.mm(labels_b))
+            top_v, top_idx = torch.topk(prop_labels_b.T, k=self.K, dim=1)
+            prop_top_scores.append(top_v)
+            prop_top_items.append(top_idx)
+        prop_top_scores = torch.cat(prop_top_scores, dim=0)
+        prop_top_items = torch.cat(prop_top_items, dim=0)
+        return prop_top_scores, prop_top_items
+
+    def get_loss(self, *params):
+        batch_users = params[0]
+        batch_users = batch_users.unique()
+        top_items_pre = self.prop_T_topk_items[batch_users]
+        T_logits_pre = self.prop_T_topk_scores[batch_users]
+        S_logits_pre = self.student.forward_multi_items(batch_users, top_items_pre)
+        T_probs_pre = torch.softmax(T_logits_pre / self.tau, dim=-1)
+        loss = F.cross_entropy(S_logits_pre / self.tau, T_probs_pre, reduction='sum')
+        return loss
+    

@@ -1,0 +1,24 @@
+bm3:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-2
+  wd: 1.e-3
+  lmbda: 5.0
+  nodemm_K: 5
+  nodemm_dropout_rate: 0.5
+  nodemm_L: 1
+  nodemm_alpha: 0.9
+  nodemm_d: 5
+  nodemm_f: 500
+lgmrec:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-7
+  lmbda: 0.1
+  nodemm_K: 5
+  nodemm_dropout_rate: 0.5
+  nodemm_L: 1
+  nodemm_alpha: 0.3
+  nodemm_d: 5
+  nodemm_f: 100

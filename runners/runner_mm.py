@@ -6,7 +6,7 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from modules.dataset import load_cf_data, load_multimodal, implicit_CF_dataset, implicit_CF_dataset_test, implicit_SR_dataset
+from modules.dataset import load_cf_data, load_multimodal, implicit_CF_dataset, implicit_CF_dataset_test, split_implicit_CF_dataset
 from modules.evaluation import Evaluator
 from modeling import backbone
 from modeling.KD.general import Scratch
@@ -22,7 +22,11 @@ def main(args, teacher_args, student_args, logger):
     validset = implicit_CF_dataset_test(num_users, num_items, valid_dict)
     testset = implicit_CF_dataset_test(num_users, num_items, test_dict)
 
-    train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True)
+    if args.model.lower() == "auxmm":
+        trainset_main = split_implicit_CF_dataset(trainset, args.main_ratio)
+        train_loader = DataLoader(trainset_main, batch_size=args.batch_size, shuffle=True)
+    else:
+        train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True)
 
     # Backbone
     all_backbones = [e.lower() for e in dir(backbone)]
@@ -113,6 +117,10 @@ def main(args, teacher_args, student_args, logger):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            
+            if args.model.lower() == "auxmm":
+                model.update_aux_params(*data)
+
             epoch_loss.append(loss.detach())
             epoch_base_loss.append(base_loss)
             epoch_kd_loss.append(kd_loss)

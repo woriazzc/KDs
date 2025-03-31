@@ -1,0 +1,10 @@
+bpr:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-3
+  lmbda: 0.05
+  blackd_tau: 1
+  blackd_K: 100
+  blind: False
+  blackd_T: 10
