@@ -1,0 +1,11 @@
+bpr:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-3
+  lmbda: 0.1
+  tempd_mode: ui
+  tempd_knn: 7
+  tempd_keep_prob: 1.0
+  tempd_alpha: 0.5
+  tempd_K: 100

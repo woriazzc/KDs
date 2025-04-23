@@ -1,0 +1,15 @@
+bpr:
+  epochs: 1000
+  batch_size: 2048
+  lr: 1.e-3
+  wd: 1.e-3
+  lmbda: 1.0
+  freqdall_beta: 0.5
+  freqall_K: 50
+  freqall_alpha_logit: 0.7
+  freqall_norm: True
+  freqall_knn: 5
+  freqall_alpha_feat: 0.5
+  freqall_keep_prob: 0.5
+  freqall_dropout_rate: 0.2
+  hidden_dim_ratio: 5

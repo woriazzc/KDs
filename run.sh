@@ -59,6 +59,7 @@ python -u main.py --task=rec --dataset=citeulike --S_backbone=bpr --T_backbone=b
 python -u main.py --task=rec --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=vkd
 python -u main.py --task=rec --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=kd
 python -u main.py --task=rec --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=mkd
+python -u main.py --task=rec --dataset=citeulike --S_backbone=bpr --T_backbone=bpr --model=freqall
 
 python -u main.py --task=rec --dataset=citeulike --S_backbone=lightgcn --T_backbone=lightgcn --model=graphd --cfg ablation=True --suffix ablation
 python -u main.py --task=rec --dataset=citeulike --S_backbone=lightgcn --T_backbone=lightgcn --model=graphd
@@ -80,6 +81,8 @@ python -u main.py --task=rec --dataset=gowalla --S_backbone=bpr --T_backbone=bpr
 python -u main.py --task=rec --dataset=gowalla --S_backbone=bpr --T_backbone=bpr --model=rrd
 python -u main.py --task=rec --dataset=gowalla --S_backbone=bpr --T_backbone=bpr --model=cpd
 python -u main.py --task=rec --dataset=gowalla --S_backbone=bpr --T_backbone=bpr --model=graphd
+python -u main.py --task=rec --dataset=gowalla --S_backbone=bpr --T_backbone=bpr --model=freqd
+python -u main.py --task=rec --dataset=gowalla --S_backbone=bpr --T_backbone=bpr --model=freqall
 
 python -u main.py --task=rec --dataset=gowalla --S_backbone=lightgcn --T_backbone=lightgcn --model=graphd
 
@@ -87,6 +90,7 @@ python -u main.py --task=rec --dataset=gowalla --S_backbone=lightgcn --T_backbon
 python -u main.py --task=rec --dataset=yelp --S_backbone=bpr --T_backbone=bpr --model=de
 python -u main.py --task=rec --dataset=yelp --S_backbone=bpr --T_backbone=bpr --model=cpd
 python -u main.py --task=rec --dataset=yelp --S_backbone=bpr --T_backbone=bpr --model=rrd
+python -u main.py --task=rec --dataset=yelp --S_backbone=bpr --T_backbone=bpr --model=freqall
 
 
 
