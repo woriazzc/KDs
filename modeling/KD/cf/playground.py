@@ -820,78 +820,204 @@ class FreqD(BaseKD4Rec):
     def __init__(self, args, teacher, student):
         super().__init__(args, teacher, student)
         self.model_name = "freqd"
-
+        self.norm = args.freqd_norm
         self.alpha = args.freqd_alpha
+        self.K = args.freqd_K
+        self.keep_prob = args.freqd_keep_prob
+        self.dropout_rate = args.freqd_dropout_rate
+        self.hidden_dim_ratio = args.hidden_dim_ratio
         
         self.student_dim = self.student.embedding_dim
         self.teacher_dim = self.teacher.embedding_dim
 
-        self.S_user_experts = Projector(self.student_dim, self.teacher_dim, 1, norm=True)
-        self.S_item_experts = Projector(self.student_dim, self.teacher_dim, 1, norm=True)
-
-        self.filter = self.construct_filter(self.alpha)
-
-    def construct_filter(self, alpha):
-        user_dim = torch.LongTensor(self.dataset.train_pairs[:, 0].cpu())
-        item_dim = torch.LongTensor(self.dataset.train_pairs[:, 1].cpu())
-
-        first_sub = torch.stack([user_dim, item_dim + self.num_users])
-        second_sub = torch.stack([item_dim + self.num_users, user_dim])
-        index = torch.cat([first_sub, second_sub], dim=1)
-        data = torch.ones(index.size(-1)).int()
-        Graph = torch.sparse_coo_tensor(index, data,
-                                            torch.Size([self.num_users + self.num_items, self.num_users + self.num_items]), dtype=torch.int)
-        dense = Graph.to_dense()
-        D = torch.sum(dense, dim=1).float()
-        D[D == 0.] = 1.
-        D_sqrt = torch.sqrt(D).unsqueeze(dim=0)
-        dense = dense / D_sqrt
-        dense = dense / D_sqrt.t()
-        index = dense.nonzero(as_tuple=False)
-        data = dense[dense >= 1e-9]
-        assert len(index) == len(data)
-        Graph = torch.sparse_coo_tensor(index.t(), data, torch.Size(
-            [self.num_users + self.num_items, self.num_users + self.num_items]), dtype=torch.float)
-        Graph = Graph.coalesce()
-        filter = self_loop_graph(Graph.size(0)) * (1. - alpha) + Graph * alpha
-        return filter.cuda()
-
-    def get_features(self, batch_entity, is_user):
-        T = torch.cat([self.teacher.user_emb.weight, self.teacher.item_emb.weight])
-        S = torch.cat([self.student.user_emb.weight, self.student.item_emb.weight])
-                    
-        S = torch.sparse.mm(self.filter, S)
-        T = torch.sparse.mm(self.filter, T)
-
-        if is_user:
-            T = T[batch_entity]
-            S = S[batch_entity]
-            experts = self.S_user_experts
-        else:
-            T = T[batch_entity + self.num_users]
-            S = S[batch_entity + self.num_users]
-            experts = self.S_item_experts
+        self.all_T_u, self.all_T_i = self.teacher.get_all_embedding()
         
-        S = experts(S)
-        return T, S
-    
-    def get_DE_loss(self, batch_entity, is_user):
-        T_feas, S_feas = self.get_features(batch_entity, is_user)
+        self.projector_u = Projector(self.student_dim, self.teacher_dim, self.hidden_dim_ratio, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=1)
+        self.projector_i = Projector(self.student_dim, self.teacher_dim, self.hidden_dim_ratio, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=1)
+        # self.Graph_u = self.construct_knn_graph(self.all_T_u, self.K, "user")
+        # self.Graph_i = self.construct_knn_graph(self.all_T_i, self.K, "item")
+        # self.Graph_u = self.construct_weighted_knn_adj(self.all_T_u, self.K, "user")
+        # self.Graph_i = self.construct_weighted_knn_adj(self.all_T_i, self.K, "item")
+        self.Graph_u = self.construct_ui_adj(self.K, "user")
+        self.Graph_i = self.construct_ui_adj(self.K, "item")
 
-        norm_T = T_feas.pow(2).sum(-1, keepdim=True).pow(1. / 2)
-        T_feas = T_feas.div(norm_T)
-        cos_theta = (T_feas * S_feas).sum(-1, keepdim=True)
-        G_diff = 1. - cos_theta
-        DE_loss = G_diff.sum()
-        return DE_loss
+    # def do_something_in_each_epoch(self, epoch):
+    #     L_i = self_loop_graph(self.Graph_i.shape[0]).cuda() - self.Graph_i
+    #     all_T = self.all_T_i    # |I|, dt
+    #     all_S = self.student.item_emb.weight
+    #     projector = self.projector_i
+    #     all_S = projector(all_S)    # |I|, dt
+    #     X = all_S - all_T   # |I|, dt
+    #     XLX = X.T.mm(L_i).mm(X) # dt, dt
+    #     XL2X = X.T.mm(L_i).mm(L_i).mm(X) # dt, dt
+    #     XL3X = X.T.mm(L_i).mm(L_i).mm(L_i).mm(X) # dt, dt
+    #     XL4X = X.T.mm(L_i).mm(L_i).mm(L_i).mm(L_i).mm(X) # dt, dt
+    #     XX = X.T.mm(X)  # dt, dt
+    #     freq_i = torch.trace(XLX) / torch.trace(XX)
+    #     freq2_i = torch.trace(XL2X) / torch.trace(XX)
+    #     freq3_i = torch.trace(XL3X) / torch.trace(XX)
+    #     freq4_i = torch.trace(XL4X) / torch.trace(XX)
+
+    #     L_u = self_loop_graph(self.Graph_u.shape[0]).cuda() - self.Graph_u
+    #     all_T = self.all_T_u    # |U|, dt
+    #     all_S = self.student.user_emb.weight
+    #     projector = self.projector_u
+    #     all_S = projector(all_S)    # |U|, dt
+    #     X = all_S - all_T   # |U|, dt
+    #     XLX = X.T.mm(L_u).mm(X) # dt, dt
+    #     XL2X = X.T.mm(L_u).mm(L_u).mm(X) # dt, dt
+    #     XL3X = X.T.mm(L_u).mm(L_u).mm(L_u).mm(X) # dt, dt
+    #     XL4X = X.T.mm(L_u).mm(L_u).mm(L_u).mm(L_u).mm(X) # dt, dt
+    #     XX = X.T.mm(X)  # dt, dt
+    #     freq_u = torch.trace(XLX) / torch.trace(XX)
+    #     freq2_u = torch.trace(XL2X) / torch.trace(XX)
+    #     freq3_u = torch.trace(XL3X) / torch.trace(XX)
+    #     freq4_u = torch.trace(XL4X) / torch.trace(XX)
+    #     mlflow.log_metrics({"freq_i": freq_i.item(), "freq_u": freq_u.item(),
+    #                         "freq2_i": freq2_i.item(), "freq2_u": freq2_u.item(),
+    #                         "freq3_i": freq3_i.item(), "freq3_u": freq3_u.item(),
+    #                         "freq4_i": freq4_i.item(), "freq4_u": freq4_u.item(),}, step=epoch)
+
+    def construct_weighted_knn_adj(self, all_embed, K, name="item"):
+        f_graph = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"Graph_wknn_{name}_{K}.pkl")
+        sucflg, Graph = load_pkls(f_graph)
+        if sucflg: return Graph.cuda()
+        bs = 128
+        N = len(all_embed)  # N, d
+        nearestK, data = [], []
+        for i in range(math.ceil(N / bs)):
+            items = torch.arange(bs * i, min(bs * (i + 1), N)).long().cuda()
+            scores = all_embed[items].mm(all_embed.T)
+            top_scores, top_items = torch.topk(scores, K + 1, dim=-1)
+            top_scores, top_items = top_scores[:, 1:], top_items[:, 1:]
+            nearestK.append(top_items)
+            data.append(top_scores)
+        nearestK = torch.cat(nearestK, dim=0)
+        data = torch.cat(data, dim=0)
+        row = torch.arange(N).repeat(K, 1).T.reshape(-1).cuda()
+        col = nearestK.reshape(-1)
+        index = torch.stack([row, col])
+        data = data.reshape(-1)
+        data = torch.ones(index.size(-1)).cuda()
+        Graph = torch.sparse_coo_tensor(index, data, (N, N), dtype=torch.float)
+        Graph = (Graph + Graph.T) / 2
+        Graph = Graph.coalesce()
+        Graph = sym_norm_graph(Graph)
+        dump_pkls((Graph, f_graph))
+        return Graph.cuda()
+
+    def construct_ui_adj(self, K, name="item"):
+        f_graph = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"Graph_inter_{name}_{K}.pkl")
+        sucflg, Graph = load_pkls(f_graph)
+        if sucflg: return Graph.cuda()
+        R = self.student.dataset.train_mat.float().cuda()   # |U|, |I|
+        if name == "user":
+            co_graph = torch.sparse.mm(R, R.T)  # |U|, |U|
+        else:
+            co_graph = torch.sparse.mm(R.T, R) # |I|, |I|
+        size = co_graph.size()
+        # sparsification
+        bs = 128
+        N = size[0]
+        nearestK, data = [], []
+        for i in range(math.ceil(N / bs)):
+            items = torch.arange(bs * i, min(bs * (i + 1), N)).long().cuda()
+            scores = torch.index_select(co_graph, 0, items).to_dense()
+            top_scores, top_items = torch.topk(scores, K + 1, dim=-1)
+            top_scores, top_items = top_scores[:, 1:], top_items[:, 1:]
+            nearestK.append(top_items)
+            data.append(top_scores)
+        nearestK = torch.cat(nearestK, dim=0)
+        data = torch.cat(data, dim=0)
+        row = torch.arange(N).repeat(K, 1).T.reshape(-1).cuda()
+        col = nearestK.reshape(-1)
+        index = torch.stack([row, col])
+        data = data.reshape(-1)
+        data = torch.ones(index.size(-1)).cuda()
+        Graph = torch.sparse_coo_tensor(index, data, size, dtype=torch.float)
+        Graph = (Graph + Graph.T) / 2
+        Graph = Graph.coalesce()
+        Graph = sym_norm_graph(Graph)
+        dump_pkls((Graph, f_graph))
+        return Graph.cuda()
+    
+    @torch.no_grad()
+    def _KNN(self, embs, K):
+        embs = pca(embs, 150)
+        topk_indices = knn(embs, embs, k=K+1)[1].reshape(-1, K + 1)
+        return topk_indices[:, 1:].cuda()
+    
+    def construct_knn_graph(self, all_embed, K, name):
+        f_graph = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"Graph_{name}_{K}.pkl")
+        sucflg, Graph = load_pkls(f_graph)
+        if sucflg: return Graph.cuda()
+        N = all_embed.shape[0]
+        nearestK = self._KNN(all_embed, K)
+        row = torch.arange(N).repeat(K, 1).T.reshape(-1).cuda()
+        col = nearestK.reshape(-1)
+        index = torch.stack([row, col])
+        data = torch.ones(index.size(-1)).cuda()
+        Graph = torch.sparse_coo_tensor(index, data, torch.Size([N, N]), dtype=torch.float)
+        Graph = (Graph + Graph.T) / 2
+        Graph = Graph.coalesce()
+        Graph = sym_norm_graph(Graph)
+        dump_pkls((Graph, f_graph))
+        return Graph.cuda()
+
+    def _dropout_graph(self, Graph):
+        size = Graph.size()
+        assert size[0] == size[1]
+        index = Graph.indices().t()
+        values = Graph.values()
+        random_index = torch.rand(len(values)) + self.keep_prob
+        random_index = random_index.int().bool()
+        index = index[random_index]
+        values = values[random_index] / self.keep_prob
+        droped_Graph = torch.sparse_coo_tensor(index.t(), values, size, dtype=torch.float)
+        return droped_Graph
+
+    def generate_filter(self, Adj, alpha):
+        droped_Adj = self._dropout_graph(Adj)
+        self_loop = self_loop_graph(droped_Adj.shape[0]).cuda()
+        H = droped_Adj * alpha + self_loop * (1. - alpha)
+        return H
+    
+    def freq_loss(self, batch_entity, all_S, all_T, filter, projector):
+        proj_all_S = projector(all_S)
+        S = torch.sparse.mm(filter, proj_all_S)
+        T = torch.sparse.mm(filter, all_T)
+        T_feas = T[batch_entity]
+        S_feas = S[batch_entity]
+        if self.norm:
+            T_feas = F.normalize(T_feas, p=2, dim=-1)
+            S_feas = F.normalize(S_feas, p=2, dim=-1)
+            cos_theta = (T_feas * S_feas).sum(-1, keepdim=True)
+            G_diff = 1. - cos_theta
+        else:
+            G_diff = (T_feas - S_feas).pow(2).sum(-1)
+        loss = G_diff.sum()
+        return loss
+
+    def get_kd_loss(self, batch_entity, mode):
+        if mode == "user":
+            all_T = self.all_T_u
+            all_S = self.student.user_emb.weight
+            projector = self.projector_u
+            H = self.generate_filter(self.Graph_u, self.alpha)
+        else:
+            all_T = self.all_T_i
+            all_S = self.student.item_emb.weight
+            projector = self.projector_i
+            H = self.generate_filter(self.Graph_i, self.alpha)
+        loss = self.freq_loss(batch_entity, all_S, all_T, H, projector)
+        return loss
 
     def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
-        DE_loss_user = self.get_DE_loss(batch_user.unique(), True)
-        DE_loss_pos = self.get_DE_loss(batch_pos_item.unique(), False)
-        DE_loss_neg = self.get_DE_loss(batch_neg_item.unique(), False)
-
-        DE_loss = DE_loss_user + (DE_loss_pos + DE_loss_neg) * 0.5
-        return DE_loss
+        loss_user = self.get_kd_loss(batch_user.unique(), mode="user")
+        loss_pos = self.get_kd_loss(batch_pos_item.unique(), mode="item")
+        loss_neg = self.get_kd_loss(batch_neg_item.unique(), mode="item")
+        loss = loss_user + (loss_pos + loss_neg) * 0.5
+        return loss
 
 
 class PrelD(BaseKD4Rec):
@@ -1754,4 +1880,307 @@ class OneD(BaseKD4Rec):
         T_probs_pre = torch.softmax(T_logits_pre / self.tau, dim=-1)
         loss = F.cross_entropy(S_logits_pre / self.tau, T_probs_pre, reduction='sum')
         return loss
+
+
+class TempD(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "tempd"
+        self.g_mode = args.tempd_mode
+        self.knn = args.tempd_knn
+        self.keep_prob = args.tempd_keep_prob
+        self.alpha = args.tempd_alpha
+        self.K = args.tempd_K
+        T_topk_scores, self.T_topk_items = self.get_topk_dict(self.teacher, self.K)
+        self.adj = self.construct_adj()
+        self.soften_T_topk_scores = self.soften(T_topk_scores, self.T_topk_items, self.alpha)
     
+    def get_topk_dict(self, model, K):
+        print('Generating Top-K dict...')
+        with torch.no_grad():
+            inter_mat = model.get_all_ratings()
+            train_pairs = self.dataset.train_pairs
+            # remove true interactions from topk_dict
+            inter_mat[train_pairs[:, 0], train_pairs[:, 1]] = -1e6
+            topk_scores, topk_dict = torch.topk(inter_mat, K, dim=-1)
+        return topk_scores.cuda(), topk_dict.cuda()
+    
+    @torch.no_grad()
+    def _KNN(self, embs, K):
+        embs = pca(embs, 150)
+        topk_indices = knn(embs, embs, k=K+1)[1].reshape(-1, K + 1)
+        return topk_indices[:, 1:].cuda()
+    
+    def construct_adj(self):
+        if self.g_mode == "knn":
+            f_graph = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"Graph_knn_{self.knn}.pkl")
+        else:
+            f_graph = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"Graph_inter_{self.knn}.pkl")
+        sucflg, Graph = load_pkls(f_graph)
+        if sucflg: return Graph.cuda()
+        if self.g_mode == "knn":
+            all_T_u, all_T_i = self.teacher.get_all_embedding()
+            N = all_T_i.shape[0]
+            nearestK = self._KNN(all_T_i, self.knn)
+            row = torch.arange(N).repeat(self.knn, 1).T.reshape(-1).cuda()
+            col = nearestK.reshape(-1)
+            index = torch.stack([row, col])
+            data = torch.ones(index.size(-1)).cuda()
+            Graph = torch.sparse_coo_tensor(index, data, torch.Size([N, N]), dtype=torch.float)
+            Graph = (Graph + Graph.T) / 2
+            Graph = Graph.coalesce()
+            Graph = sym_norm_graph(Graph)
+        else:
+            R = self.student.dataset.train_mat.float().cuda()
+            item_co_graph = torch.sparse.mm(R.T, R) # |I|, |I|
+            size = item_co_graph.size()
+            # sparsification
+            bs = 128
+            nearestK, data = [], []
+            for i in range(math.ceil(self.num_items / bs)):
+                items = torch.arange(bs * i, min(bs * (i + 1), self.num_items)).long().cuda()
+                scores = torch.index_select(item_co_graph, 0, items).to_dense()
+                top_scores, top_items = torch.topk(scores, self.knn + 1, dim=-1)
+                top_scores, top_items = top_scores[:, 1:], top_items[:, 1:]
+                nearestK.append(top_items)
+                data.append(top_scores)
+            nearestK = torch.cat(nearestK, dim=0)
+            data = torch.cat(data, dim=0)
+            row = torch.arange(self.num_items).repeat(self.knn, 1).T.reshape(-1).cuda()
+            col = nearestK.reshape(-1)
+            index = torch.stack([row, col])
+            data = data.reshape(-1)
+            data = torch.ones(index.size(-1)).cuda()
+            Graph = torch.sparse_coo_tensor(index, data, size, dtype=torch.float)
+            Graph = (Graph + Graph.T) / 2
+            Graph = Graph.coalesce()
+            Graph = sym_norm_graph(Graph)
+        dump_pkls((Graph, f_graph))
+        return Graph.cuda()
+
+    def _dropout_graph(self, Graph):
+        if self.keep_prob >= 1.0:
+            return Graph
+        size = Graph.size()
+        index = Graph.indices().t()
+        values = Graph.values()
+        random_index = torch.rand(len(values)) + self.keep_prob
+        random_index = random_index.int().bool()
+        index = index[random_index]
+        values = values[random_index] / self.keep_prob
+        droped_Graph = torch.sparse_coo_tensor(index.t(), values, size, dtype=torch.float)
+        return droped_Graph
+    
+    def soften(self, logits, items, alpha):
+        droped_Adj = self._dropout_graph(self.adj)
+        self_loop = self_loop_graph(droped_Adj.shape[0]).cuda()
+        H = alpha * droped_Adj + (1. - alpha) * self_loop
+        
+        bs = 2048
+        soften_logits = []
+        for i in range(math.ceil(logits.shape[0] / bs)):
+            users = torch.arange(bs * i, min(bs * (i + 1), logits.shape[0])).long().cuda()
+            N_u = len(users)
+            idxs = torch.arange(0, N_u).long().cuda()
+            logits_b, items_b = logits[users], items[users]
+            logits_all = torch.zeros((N_u, self.num_items), device=logits.device)
+            logits_all[idxs.unsqueeze(1), items_b] = logits_b  # bs, |I|
+            soften_logits_all = torch.sparse.mm(H, logits_all.T).T  # bs, |I|
+            soften_logits.append(soften_logits_all[idxs.unsqueeze(1), items_b])  # bs, K
+        soften_logits = torch.cat(soften_logits, dim=0)
+        return soften_logits
+
+    # def do_something_in_each_epoch(self, epoch):
+    #     self.vb = 1
+    #     self.epoch = epoch
+    
+    def get_loss(self, *params):
+        batch_users = params[0].unique()
+        top_items = self.T_topk_items[batch_users]
+        S_logits = self.student.forward_multi_items(batch_users, top_items)
+        soften_T_logits = self.soften_T_topk_scores[batch_users]
+        soften_S_logits = self.soften(S_logits, top_items, self.alpha)
+        T_probs = torch.softmax(soften_T_logits, dim=-1)
+        loss = F.cross_entropy(soften_S_logits, T_probs, reduction='sum')
+
+        loss /= math.pow(1. - self.alpha, 2)
+
+        # if self.vb:
+        #     self.vb = 0
+
+        #     # grd_s = torch.autograd.grad(loss, soften_S_logits, retain_graph=True)[0].detach()   # bs, K
+        #     # users = torch.arange(0, grd_s.shape[0]).long().cuda()
+        #     # N_u = len(users)
+        #     # idxs = torch.arange(0, N_u).long().cuda()
+        #     # logits_all = torch.zeros((N_u, self.num_items)).cuda()
+        #     # logits_all[idxs.unsqueeze(1), top_items] = grd_s  # bs, |I|
+        #     # L = self_loop_graph(self.adj.shape[0]).cuda() - self.adj
+        #     # H = self_loop_graph(self.adj.shape[0]).cuda() - self.alpha * L
+        #     # Lp = torch.sparse.mm(L, logits_all.T).T  # bs, |I|
+        #     # rt = torch.trace(Lp.mm(logits_all.T)) / logits_all.pow(2).sum()
+        #     # rk = Lp.pow(2).sum() / logits_all.pow(2).sum()
+        #     # Hp = torch.sparse.mm(H, logits_all.T).T  # bs, |I|
+        #     # rh = Hp.pow(2).sum() / logits_all.pow(2).sum()
+        #     # mlflow.log_metrics({"pLp": rt.item(), "pLLp": rk.item(), "pHp": rh.item()})
+
+        #     grd = torch.autograd.grad(loss, S_logits, retain_graph=True)[0].detach()    # bs, K
+        #     grd_norm = grd.pow(2).sum()
+        #     mlflow.log_metrics({"grd_norm": grd_norm.item()}, step=self.epoch)
+        return loss
+
+
+class FreqAll(BaseKD4Rec):
+    def __init__(self, args, teacher, student):
+        super().__init__(args, teacher, student)
+        self.model_name = "freqall"
+        self.beta = args.freqdall_beta
+        self.K = args.freqall_K
+        self.alpha_logit = args.freqall_alpha_logit
+
+        self.norm = args.freqall_norm
+        self.knn = args.freqall_knn
+        self.alpha_feat = args.freqall_alpha_feat
+        self.keep_prob = args.freqall_keep_prob
+        self.dropout_rate = args.freqall_dropout_rate
+        self.hidden_dim_ratio = args.hidden_dim_ratio
+        
+        self.adj_u = self.construct_ui_adj(self.knn, "user")
+        self.adj_i = self.construct_ui_adj(self.knn, "item")
+
+        T_topk_scores, self.T_topk_items = self.get_topk_dict(self.teacher, self.K)
+        self.soften_T_topk_scores = self.soften(T_topk_scores, self.T_topk_items, self.alpha_logit)
+        
+        self.student_dim = self.student.embedding_dim
+        self.teacher_dim = self.teacher.embedding_dim
+        self.all_T_u, self.all_T_i = self.teacher.get_all_embedding()
+        self.projector_u = Projector(self.student_dim, self.teacher_dim, self.hidden_dim_ratio, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=1)
+        self.projector_i = Projector(self.student_dim, self.teacher_dim, self.hidden_dim_ratio, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=1)
+
+    def get_topk_dict(self, model, K):
+        print('Generating Top-K dict...')
+        with torch.no_grad():
+            inter_mat = model.get_all_ratings()
+            train_pairs = self.dataset.train_pairs
+            # remove true interactions from topk_dict
+            inter_mat[train_pairs[:, 0], train_pairs[:, 1]] = -1e6
+            topk_scores, topk_dict = torch.topk(inter_mat, K, dim=-1)
+        return topk_scores.cuda(), topk_dict.cuda()
+    
+    def construct_ui_adj(self, K, name="item"):
+        f_graph = os.path.join("modeling", "KD", "crafts", self.args.dataset, self.args.T_backbone, self.model_name, f"Graph_inter_{name}_{K}.pkl")
+        sucflg, Graph = load_pkls(f_graph)
+        if sucflg: return Graph.cuda()
+        R = self.student.dataset.train_mat.float().cuda()   # |U|, |I|
+        if name == "user":
+            co_graph = torch.sparse.mm(R, R.T)  # |U|, |U|
+        else:
+            co_graph = torch.sparse.mm(R.T, R) # |I|, |I|
+        size = co_graph.size()
+        # sparsification
+        bs = 128
+        N = size[0]
+        nearestK, data = [], []
+        for i in range(math.ceil(N / bs)):
+            items = torch.arange(bs * i, min(bs * (i + 1), N)).long().cuda()
+            scores = torch.index_select(co_graph, 0, items).to_dense()
+            top_scores, top_items = torch.topk(scores, K + 1, dim=-1)
+            top_scores, top_items = top_scores[:, 1:], top_items[:, 1:]
+            nearestK.append(top_items)
+            data.append(top_scores)
+        nearestK = torch.cat(nearestK, dim=0)
+        data = torch.cat(data, dim=0)
+        row = torch.arange(N).repeat(K, 1).T.reshape(-1).cuda()
+        col = nearestK.reshape(-1)
+        index = torch.stack([row, col])
+        data = data.reshape(-1)
+        data = torch.ones(index.size(-1)).cuda()
+        Graph = torch.sparse_coo_tensor(index, data, size, dtype=torch.float)
+        Graph = (Graph + Graph.T) / 2
+        Graph = Graph.coalesce()
+        Graph = sym_norm_graph(Graph)
+        dump_pkls((Graph, f_graph))
+        return Graph.cuda()
+
+    def _dropout_graph(self, Graph):
+        if self.keep_prob >= 1.0:
+            return Graph
+        size = Graph.size()
+        index = Graph.indices().t()
+        values = Graph.values()
+        random_index = torch.rand(len(values)) + self.keep_prob
+        random_index = random_index.int().bool()
+        index = index[random_index]
+        values = values[random_index] / self.keep_prob
+        droped_Graph = torch.sparse_coo_tensor(index.t(), values, size, dtype=torch.float)
+        return droped_Graph
+    
+    def soften(self, logits, items, alpha):
+        self_loop = self_loop_graph(self.adj_i.shape[0]).cuda()
+        H = alpha * self.adj_i + (1. - alpha) * self_loop
+        bs = 2048
+        soften_logits = []
+        for i in range(math.ceil(logits.shape[0] / bs)):
+            users = torch.arange(bs * i, min(bs * (i + 1), logits.shape[0])).long().cuda()
+            N_u = len(users)
+            idxs = torch.arange(0, N_u).long().cuda()
+            logits_b, items_b = logits[users], items[users]
+            logits_all = torch.zeros((N_u, self.num_items), device=logits.device)
+            logits_all[idxs.unsqueeze(1), items_b] = logits_b  # bs, |I|
+            soften_logits_all = torch.sparse.mm(H, logits_all.T).T  # bs, |I|
+            soften_logits.append(soften_logits_all[idxs.unsqueeze(1), items_b])  # bs, K
+        soften_logits = torch.cat(soften_logits, dim=0)
+        return soften_logits
+
+    def generate_filter(self, Adj, alpha):
+        droped_Adj = self._dropout_graph(Adj)
+        self_loop = self_loop_graph(droped_Adj.shape[0]).cuda()
+        H = droped_Adj * alpha + self_loop * (1. - alpha)
+        return H
+    
+    def freq_loss(self, batch_entity, all_S, all_T, filter, projector):
+        proj_all_S = projector(all_S)
+        S = torch.sparse.mm(filter, proj_all_S)
+        T = torch.sparse.mm(filter, all_T)
+        T_feas = T[batch_entity]
+        S_feas = S[batch_entity]
+        if self.norm:
+            T_feas = F.normalize(T_feas, p=2, dim=-1)
+            S_feas = F.normalize(S_feas, p=2, dim=-1)
+            cos_theta = (T_feas * S_feas).sum(-1, keepdim=True)
+            G_diff = 1. - cos_theta
+        else:
+            G_diff = (T_feas - S_feas).pow(2).sum(-1)
+        loss = G_diff.sum()
+        return loss
+
+    def get_kd_loss(self, batch_entity, mode):
+        if mode == "user":
+            all_T = self.all_T_u
+            all_S = self.student.user_emb.weight
+            projector = self.projector_u
+            H = self.generate_filter(self.adj_u, self.alpha_feat)
+        else:
+            all_T = self.all_T_i
+            all_S = self.student.item_emb.weight
+            H = self.generate_filter(self.adj_i, self.alpha_feat)
+            projector = self.projector_i
+        loss = self.freq_loss(batch_entity, all_S, all_T, H, projector)
+        return loss
+    
+    def get_loss(self, batch_user, batch_pos_item, batch_neg_item):
+        loss_user = self.get_kd_loss(batch_user.unique(), mode="user")
+        loss_pos = self.get_kd_loss(batch_pos_item.unique(), mode="item")
+        loss_neg = self.get_kd_loss(batch_neg_item.unique(), mode="item")
+        loss_feat = loss_user + (loss_pos + loss_neg) * 0.5
+
+        batch_users = batch_user.unique()
+        top_items = self.T_topk_items[batch_users]
+        S_logits = self.student.forward_multi_items(batch_users, top_items)
+        soften_T_logits = self.soften_T_topk_scores[batch_users]
+        soften_S_logits = self.soften(S_logits, top_items, self.alpha_logit)
+        T_probs = torch.softmax(soften_T_logits, dim=-1)
+        loss_logit = F.cross_entropy(soften_S_logits, T_probs, reduction='sum')
+        loss_logit /= math.pow(1. - self.alpha_logit, 2)
+
+        loss = loss_feat + self.beta * loss_logit
+        return loss

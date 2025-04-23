@@ -117,16 +117,6 @@ class FreqMM(BaseKD4MM):
         loss = loss_user + loss_item
         return loss
 
-    def do_something_in_each_epoch(self, epoch):
-        with torch.no_grad():
-            suff = "_norm" if self.args.norm else ""
-            torch.save(self.all_T_u.detach().cpu(), f"T_u{suff}.pt")
-            torch.save(self.all_T_i.detach().cpu(), f"T_i{suff}.pt")
-            S_u = self.projector_u(self.student.user_emb.weight)
-            S_i = self.projector_i(self.student.item_emb.weight)
-            torch.save(S_u.detach().cpu(), f"S_u{suff}.pt")
-            torch.save(S_i.detach().cpu(), f"S_i{suff}.pt")
-
 
 class IdealD(BaseKD4MM):
     def __init__(self, args, teacher, student):
