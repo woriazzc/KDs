@@ -66,15 +66,7 @@ python -u main.py --task=rec --dataset=citeulike --S_backbone=lightgcn --T_backb
 python -u main.py --task=rec --dataset=citeulike --S_backbone=lightgcn --T_backbone=lightgcn --model=de
 python -u main.py --task=rec --dataset=citeulike --S_backbone=lightgcn --T_backbone=lightgcn --model=cpd
 python -u main.py --task=rec --dataset=citeulike --S_backbone=lightgcn --T_backbone=lightgcn --model=rrd
-
-
-python -u main.py --task=rec --dataset=foursquare --S_backbone=bpr --T_backbone=bpr --model=de
-python -u main.py --task=rec --dataset=foursquare --S_backbone=bpr --T_backbone=bpr --model=cpd
-python -u main.py --task=rec --dataset=foursquare --S_backbone=bpr --T_backbone=bpr --model=nkd
-python -u main.py --task=rec --dataset=foursquare --S_backbone=bpr --T_backbone=bpr --model=graphd
-python -u main.py --task=rec --dataset=foursquare --S_backbone=bpr --T_backbone=bpr --model=filterd
-
-python -u main.py --task=rec --dataset=foursquare --S_backbone=lightgcn --T_backbone=lightgcn --model=nkd
+python -u main.py --task=rec --dataset=citeulike --S_backbone=lightgcn --T_backbone=lightgcn --model=freqall
 
 
 python -u main.py --task=rec --dataset=gowalla --S_backbone=bpr --T_backbone=bpr --model=de
@@ -85,6 +77,7 @@ python -u main.py --task=rec --dataset=gowalla --S_backbone=bpr --T_backbone=bpr
 python -u main.py --task=rec --dataset=gowalla --S_backbone=bpr --T_backbone=bpr --model=freqall
 
 python -u main.py --task=rec --dataset=gowalla --S_backbone=lightgcn --T_backbone=lightgcn --model=graphd
+python -u main.py --task=rec --dataset=gowalla --S_backbone=lightgcn --T_backbone=lightgcn --model=freqall
 
 
 python -u main.py --task=rec --dataset=yelp --S_backbone=bpr --T_backbone=bpr --model=de
@@ -92,6 +85,7 @@ python -u main.py --task=rec --dataset=yelp --S_backbone=bpr --T_backbone=bpr --
 python -u main.py --task=rec --dataset=yelp --S_backbone=bpr --T_backbone=bpr --model=rrd
 python -u main.py --task=rec --dataset=yelp --S_backbone=bpr --T_backbone=bpr --model=freqall
 
+python -u main.py --task=rec --dataset=yelp --S_backbone=lightgcn --T_backbone=lightgcn --model=freqall
 
 
 """
