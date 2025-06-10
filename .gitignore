@@ -1,9 +1,9 @@
 __pycache__/
 .vscode/
-
 checkpoints/
 logs/
 **/*.txt
+!requirements.txt
 **/*.csv
 **/*.pkl
 **/*.dat
