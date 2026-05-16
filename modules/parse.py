@@ -69,6 +69,8 @@ parser.add_argument(
 args = parser.parse_args()
 if args.train_teacher:
     args.model = "scratch"
+if args.task == "ctr" and args.early_stop_metric == "NDCG":
+    args.early_stop_metric = "AUC"
 args.__dict__.update({"LOG_DIR": LOG_DIR, "CONFIG_DIR": CONFIG_DIR, "DATA_DIR": DATA_DIR, "CKPT_DIR": CKPT_DIR, "CRAFT_DIR": CRAFT_DIR})
 
 """

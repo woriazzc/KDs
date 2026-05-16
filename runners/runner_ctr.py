@@ -24,7 +24,8 @@ def main(args, teacher_args, student_args, logger):
         all_teacher_args.__dict__.update(teacher_args.__dict__)
         all_student_args.__dict__.update(student_args.__dict__)
         Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.T_backbone.lower())])(all_teacher_args, feature_stastic).cuda()
-        Student = getattr(backbone, dir(backbone)[all_backbones.index(args.S_backbone.lower())])(all_student_args, feature_stastic).cuda()
+        if not args.train_teacher:
+            Student = getattr(backbone, dir(backbone)[all_backbones.index(args.S_backbone.lower())])(all_student_args, feature_stastic).cuda()
     else:
         logger.log(f'Invalid backbone {args.S_backbone}.')
         raise(NotImplementedError, f'Invalid backbone {args.S_backbone}.')
@@ -36,8 +37,8 @@ def main(args, teacher_args, student_args, logger):
         else:
             model = Scratch(args, Student).cuda()
     else:
-        T_path = os.path.join("checkpoints", args.dataset, args.T_backbone, f"scratch-{teacher_args.model.lower()}-{teacher_args.embedding_dim}", "BEST_EPOCH.pt")
-        Teacher.load_state_dict(torch.load(T_path))
+        T_path = os.path.join("checkpoints", args.dataset, args.T_backbone, f"scratch-{teacher_args.embedding_dim}", "BEST_EPOCH.pt")
+        Teacher.load_state_dict(torch.load(T_path, weights_only=True))
         all_models = [e.lower() for e in dir(KD)]
         if args.model.lower() in all_models:
             model = getattr(KD, dir(KD)[all_models.index(args.model.lower())])(args, Teacher, Student).cuda()
@@ -114,9 +115,14 @@ def main(args, teacher_args, student_args, logger):
     Evaluator.print_final_result(logger, eval_dict)
     if not args.no_save:
         embedding_dim = teacher_args.embedding_dim if args.train_teacher else student_args.embedding_dim
-        backbone_name = teacher_args.model if args.train_teacher else student_args.model
+        backbone_name = args.T_backbone if args.train_teacher else args.S_backbone
         args.suffix = '' if args.suffix == "teacher" else args.suffix
-        save_dir = os.path.join("checkpoints", args.dataset, args.S_backbone, f"{args.model.lower()}-{backbone_name.lower()}-{embedding_dim}" + ('_' if args.suffix != '' else '') + args.suffix)
+        save_dir = os.path.join(
+            "checkpoints",
+            args.dataset,
+            backbone_name,
+            f"{args.model.lower()}-{embedding_dim}" + ('_' if args.suffix != '' else '') + args.suffix
+        )
         os.makedirs(save_dir, exist_ok=True)
         torch.save(best_model, os.path.join(save_dir, "BEST_EPOCH.pt"))
         for idx, ckpt in enumerate(ckpts):

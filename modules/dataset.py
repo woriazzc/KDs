@@ -301,23 +301,30 @@ def get_ctr_dataset(args):
         return train, val, test, config["feature_stastic"]
     
 def parse_file(filename, args, config):
-    import tensorflow as tf
+    if 'movie' not in filename:
+        feature_names = list(config["feature_stastic"].keys())
+    else:
+        feature_names = [
+            'user_id', 'item_id', 'label', 'weekday', 'hour', 'age',
+            'gender', 'occupation', 'zip_code', 'movie_title',
+            'release_year', 'genre'
+        ]
 
-    dataset = tf.data.TextLineDataset(filename)
-    
-    def decoding(record, feature_name, feature_default):
-        data = tf.io.decode_csv(record, feature_default)
-        feature = dict(zip(feature_name, data))
-        label = feature.pop('label')
-        # for ft in ['weekday', 'hour', 'movie_title', 'genre']:
-        #     feature.pop(ft, -1)
-        return feature, label
-    
-    dataset = dataset.map(lambda line : decoding(line, config["feature_stastic"].keys() if 'movie' not in filename else ['user_id', 'item_id', 'label', 'weekday', 'hour', 'age', 'gender', 'occupation','zip_code', 'movie_title', 'release_year', 'genre'], config["feature_defaults"]), num_parallel_calls=10).batch(args.batch_size)
-    
     Data = []
-    for data in tqdm(dataset.as_numpy_iterator()):
-        record = data[0]
-        record['label'] = data[1].astype(np.float32)
+    reader = pd.read_csv(
+        filename,
+        header=None,
+        names=feature_names,
+        chunksize=args.batch_size,
+        low_memory=False,
+    )
+    for chunk in tqdm(reader):
+        chunk = chunk.fillna(0)
+        record = {}
+        for name in feature_names:
+            if name == "label":
+                continue
+            record[name] = chunk[name].to_numpy()
+        record["label"] = chunk["label"].to_numpy(dtype=np.float32)
         Data.append(record)
     return Data

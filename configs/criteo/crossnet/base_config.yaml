@@ -1,9 +1,9 @@
 teacher:
-  CrossNet:
+  crossnet:
     embedding_dim: 20
     L2: 1.e-5
     depth: 4
-  DNN:
+  dnn:
     embedding_dim: 20
     L2: 1.e-5
     hidden_dims: [1000, 1000, 1000, 1000, 1000, 780, 1]

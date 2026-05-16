@@ -22,7 +22,11 @@ class HetD(BaseKD4CTR):
         self.lmbda = args.lmbda
         self.verbose = args.verbose
 
-        student_penultimate_dim = self.student._penultimate_dim
+        if isinstance(self.student._penultimate_dim, int):
+            student_penultimate_dim = self.student._penultimate_dim
+        else:
+            cross_dim, deep_dim = self.student._penultimate_dim
+            student_penultimate_dim = cross_dim + deep_dim
         if isinstance(self.teacher._penultimate_dim, int):
             # For one-stream models
             teacher_penultimate_dim = self.teacher._penultimate_dim
@@ -44,6 +48,9 @@ class HetD(BaseKD4CTR):
     def get_loss(self, data, label):
         S_emb = self.student.forward_penultimate(data)
         T_emb = self.teacher.forward_penultimate(data)
+        if isinstance(self.student._penultimate_dim, tuple):
+            S_emb_cross, S_emb_deep = S_emb
+            S_emb = torch.cat([S_emb_cross, S_emb_deep], dim=-1)
         if isinstance(self.teacher._penultimate_dim, tuple):
             # Two-stream models
             T_emb_cross, T_emb_deep = T_emb
