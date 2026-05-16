@@ -34,7 +34,8 @@ class KD(BaseKD4Rec):
         if self.guide == "student":
             self.topk_dict = self.get_topk_dict(self.student)
     
-    def get_loss(self, batch_users, batch_pos_item, batch_neg_item):
+    def get_loss(self, *params):
+        batch_users = params[0]
         logit_T = self.teacher.forward_multi_items(batch_users, self.topk_dict[batch_users])
         logit_S = self.student.forward_multi_items(batch_users, self.topk_dict[batch_users])
         prob_T = torch.softmax(logit_T / self.tau, dim=-1)

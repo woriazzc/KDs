@@ -25,4 +25,3 @@ hstu:
   kd_tau: 1
   kd_K: 50
   kd_guide: student
-  preload: True
