@@ -35,9 +35,6 @@ class FreqMM(BaseKD4MM):
         self.projector_i = Projector(self.student_dim, self.teacher_dim, 1, norm=False, dropout_rate=self.dropout_rate, hidden_dim_ratio=self.hidden_dim_ratio)
         self.Graph_u = self.construct_knn_graph(self.all_T_u, self.K, "user")
         self.Graph_i = self.construct_knn_graph(self.all_T_i, self.K, "item")
-    
-    def get_params_to_update(self):
-        return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
 
     @torch.no_grad()
     def _KNN(self, embs, K):

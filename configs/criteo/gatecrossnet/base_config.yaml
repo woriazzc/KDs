@@ -1,9 +1,7 @@
 teacher:
   gatecrossnet:
     embedding_dim: 20
-    L2: 0
     depth: 6
 student:
   embedding_dim: 20
-  L2: 0
   depth: 2

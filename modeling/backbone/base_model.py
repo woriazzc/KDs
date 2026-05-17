@@ -259,7 +259,6 @@ class BaseCTR(nn.Module):
         self.model_type = "ctr"
         self.args = args
         self.embedding_dim = args.embedding_dim
-        self.L2_weight = args.L2
         self.num_fields = len(feature_stastic) - 1
         self.numeric_features = set(getattr(args, "numeric_features", []))
         self.embedding_layer = Embedding(self.embedding_dim, feature_stastic, self.numeric_features)
@@ -279,17 +278,6 @@ class BaseCTR(nn.Module):
     def FeatureInteraction(self, dense_input, sparse_input):
         raise NotImplementedError
 
-    def L2_Loss(self, weight):
-        if weight == 0:
-            return 0
-        loss = 0
-        for _, module in self.named_modules():
-                for p_name, param in module.named_parameters():
-                    if param.requires_grad:
-                        if p_name in ["weight", "bias"]:
-                            loss += torch.norm(param, p=2)
-        return loss * weight
-    
     def get_loss(self, logits, label):
-        loss = F.binary_cross_entropy_with_logits(logits.squeeze(-1), label.squeeze(-1).float()) + self.L2_Loss(self.L2_weight)
+        loss = F.binary_cross_entropy_with_logits(logits.squeeze(-1), label.squeeze(-1).float())
         return loss

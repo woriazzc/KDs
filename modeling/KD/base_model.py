@@ -84,7 +84,7 @@ class BaseKD4CTR(BaseKD):
         super().__init__(args, teacher, student, frozen_teacher)
     
     def get_params_to_update(self):
-        return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': 0}]
+        return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
 
     def forward(self, data, label):
         output = self.student(data)

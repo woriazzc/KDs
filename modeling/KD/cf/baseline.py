@@ -240,9 +240,6 @@ class DE(BaseKD4Rec):
 
         self.sm = nn.Softmax(dim=1)
 
-    def get_params_to_update(self):
-        return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
-
     def do_something_in_each_epoch(self, epoch):
         self.current_T = self.end_T * self.anneal_size * ((1. / self.anneal_size) ** (epoch / self.max_epoch))
         self.current_T = max(self.current_T, self.end_T)
@@ -503,9 +500,6 @@ class HTD(BaseKD4Rec):
         self.item_v = nn.Sequential(nn.Linear(self.teacher_dim, self.num_experts), nn.Softmax(dim=1))
 
         self.sm = nn.Softmax(dim=1)
-
-    def get_params_to_update(self):
-        return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
     
     def do_something_in_each_epoch(self, epoch):
         self.T = 1.0 * ((1e-10 / 1.0) ** (epoch / self.max_epoch))

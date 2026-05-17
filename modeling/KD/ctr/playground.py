@@ -313,7 +313,7 @@ class copyD(BaseKD4CTR):
         #         for p_name, param in module.named_parameters():
         #             if param.requires_grad:
         #                 if p_name in ["weight", "bias"]:
-        #                     loss_linear += torch.norm(param, p=2) * self.student.L2_weight
+        #                     loss_linear += torch.norm(param, p=2)
         loss = loss_emb
         self.loss_emb = (self.loss_emb * self.cnt + loss_emb.detach().item()) / (self.cnt + 1)
         # self.loss_linear = (self.loss_linear * self.cnt + loss_linear.detach().item()) / (self.cnt + 1)

@@ -2,4 +2,5 @@ dcnv2:
   epochs: 1000
   batch_size: 4096
   lr: 1.e-3
+  wd: 1.e-5
   lmbda: 50.0

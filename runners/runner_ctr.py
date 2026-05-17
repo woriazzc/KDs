@@ -53,7 +53,7 @@ def main(args, teacher_args, student_args, logger):
 
     # Optimizer
     model = maybe_parallelize(model, args)
-    optimizer = optim.Adam(model.get_params_to_update())
+    optimizer = optim.AdamW(model.get_params_to_update())
 
     # Evaluator
     evaluator = Evaluator(args)

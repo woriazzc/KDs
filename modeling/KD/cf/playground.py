@@ -284,9 +284,6 @@ class NKD(BaseKD4Rec):
         all_u, all_i = self.teacher.get_all_embedding()
         self.nearestK_u, self.nearestK_i = self.get_nearest_K(all_u, all_i, self.K)
 
-    def get_params_to_update(self):
-        return [{"params": [param for param in self.parameters() if param.requires_grad], 'lr': self.args.lr, 'weight_decay': self.args.wd}]
-
     def _KNN(self, embs, K):
         with torch.no_grad():
             embs = pca(embs, 150)

@@ -6,3 +6,8 @@ torch-cluster==1.6.3+pt24cu124
 torch_scatter==2.1.2+pt24cu124
 torch-sparse==0.6.18+pt24cu124
 torch-spline-conv==1.2.2+pt24cu124
+pyyaml
+pyro-ppl
+scikit-learn
+pandas
+mlflow
