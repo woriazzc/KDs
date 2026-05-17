@@ -1,42 +1,28 @@
-# Criteo_x4
+# Criteo_x1
 
 + **Dataset description:**
 
-  The Criteo dataset is a widely-used benchmark dataset for CTR prediction, which contains about one week of click-through data for display advertising. It has 13 numerical feature fields and 26 categorical feature fields. Following the setting with the [AutoInt work](https://arxiv.org/abs/1810.11921), we randomly split the data into 8:1:1 as the training set, validation set, and test set, respectively. 
+  The Criteo dataset is a widely-used benchmark dataset for CTR prediction, which contains about one week of click-through data for display advertising. It has 13 numerical feature fields and 26 categorical feature fields. Following the [AFN](https://ojs.aaai.org/index.php/AAAI/article/view/5768) work, we randomly split the data into 7:2:1\* as the training set, validation set, and test set, respectively. 
 
   The dataset statistics are summarized as follows:
 
   | Dataset Split  | Total | #Train | #Validation | #Test | 
   | :--------: | :-----: |:-----: | :----------: | :----: | 
-  | Criteo_x4 |  45,840,617     |   36,672,493  |   4,584,062    |  4,584,062    |    
-
-
-  - Criteo_x4_001
-
-    In this setting, we follow the winner's solution of the Criteo challenge to discretize each integer value x to ⌊log2(x)⌋, if x > 2; and x = 1 otherwise. For all categorical fields, we replace infrequent features with a default ``<OOV>`` token by setting the threshold min_category_count=10. Note that we do not follow the exact preprocessing steps in AutoInt, because this preprocessing performs much better. We fix **embedding_dim=16** as with AutoInt.
-    
-  - Criteo_x4_002
-
-    In this setting, we follow the winner's solution of the Criteo challenge to discretize each integer value x to ⌊log2(x)⌋, if x > 2; and x = 1 otherwise. For all categorical fields, we replace infrequent features with a default ``<OOV>`` token by setting the threshold min_category_count=2. We fix **embedding_dim=40** in this setting.
-
+  | Criteo_x1 |  45,840,617     | 33,003,326   |  8,250,124     | 4,587,167     |         
 
 + **Source:** https://www.kaggle.com/c/criteo-display-ad-challenge/data
-+ **Download:** https://huggingface.co/datasets/reczoo/Criteo_x4/tree/main
++ **Download:** https://huggingface.co/datasets/reczoo/Criteo_x1/tree/main
 + **RecZoo Datasets:** https://github.com/reczoo/Datasets
 
 + **Used by papers:** 
-  - Weiping Song, Chence Shi, Zhiping Xiao, Zhijian Duan, Yewen Xu, Ming Zhang, Jian Tang. [AutoInt: Automatic Feature Interaction Learning via Self-Attentive Neural Networks](https://arxiv.org/abs/1810.11921). In CIKM 2019.
-  - Jieming Zhu, Jinyang Liu, Shuai Yang, Qi Zhang, Xiuqiang He. [BARS-CTR: Open Benchmarking for Click-Through Rate Prediction](https://arxiv.org/abs/2009.05794). In CIKM 2021.
+    - Weiyu Cheng, Yanyan Shen, Linpeng Huang. [Adaptive Factorization Network: Learning Adaptive-Order Feature Interactions](https://ojs.aaai.org/index.php/AAAI/article/view/5768). In AAAI 2020.
+    - Kelong Mao, Jieming Zhu, Liangcai Su, Guohao Cai, Yuru Li, Zhenhua Dong. [FinalMLP: An Enhanced Two-Stream MLP Model for CTR Prediction](https://arxiv.org/abs/2304.00902). In AAAI 2023.
+    - Jieming Zhu, Qinglin Jia, Guohao Cai, Quanyu Dai, Jingjie Li, Zhenhua Dong, Ruiming Tang, Rui Zhang. [FINAL: Factorized Interaction Layer for CTR Prediction](https://dl.acm.org/doi/10.1145/3539618.3591988). In SIGIR 2023.
 
 + **Check the md5sum for data integrity:**
-  ```bash
-  $ md5sum train.csv valid.csv test.csv
-  4a53bb7cbc0e4ee25f9d6a73ed824b1a  train.csv
-  fba5428b22895016e790e2dec623cb56  valid.csv
-  cfc37da0d75c4d2d8778e76997df2976  test.csv
-  ```
-
-['Label', 'I1', 'I2', 'I3', 'I4', 'I5', 'I6', 'I7', 'I8', 'I9', 'I10',
-       'I11', 'I12', 'I13', 'C1', 'C2', 'C3', 'C4', 'C5', 'C6', 'C7', 'C8',
-       'C9', 'C10', 'C11', 'C12', 'C13', 'C14', 'C15', 'C16', 'C17', 'C18',
-       'C19', 'C20', 'C21', 'C22', 'C23', 'C24', 'C25', 'C26']
+    ```bash
+    $ md5sum train.csv valid.csv test.csv
+    30b89c1c7213013b92df52ec44f52dc5  train.csv
+    f73c71fb3c4f66b6ebdfa032646bea72  valid.csv
+    2c48b26e84c04a69b948082edae46f8c  test.csv
+    ```

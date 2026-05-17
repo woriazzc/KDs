@@ -3,6 +3,7 @@ import re
 import yaml
 import math
 import pickle
+import shutil
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
@@ -258,73 +259,125 @@ class implicit_CF_dataset_test(data.Dataset):
 # CTR datasets
 #################################################################################################################
 
-def get_ctr_dataset(args):
-    cachepath = os.path.join(args.DATA_DIR, args.dataset, f"bs{args.batch_size}.cache")
-    datapath = f"{args.DATA_DIR}{args.dataset}/{args.dataset}"
-    config = yaml.load(open(os.path.join(args.DATA_DIR, args.dataset, 'config.yaml'), 'r'), Loader=yaml.FullLoader)
-    if os.path.exists(cachepath):
-        with open(cachepath, 'rb') as f:
-            train, val, test = pickle.load(f)
-        return train, val, test, config["feature_stastic"]
-    else:
-        train = parse_file(datapath + '_train', args, config)
-        val = parse_file(datapath + '_val', args, config)
-        test = parse_file(datapath + '_test', args, config)
-    
-        res = []
-        for record in train:
-            news = {}
-            for k , v in record.items():
-                news[k] = torch.from_numpy(v)
-            res.append(news)
-        train = res
+class CTRChunkLoader:
+    def __init__(self, chunk_paths):
+        self.chunk_paths = chunk_paths
 
-        res = []
-        for record in val:
-            news = {}
-            for k , v in record.items():
-                news[k] = torch.from_numpy(v)
-            res.append(news)
-        val = res
+    def __len__(self):
+        return len(self.chunk_paths)
 
-        res = []
-        for record in test:
-            news = {}
-            for k , v in record.items():
-                news[k] = torch.from_numpy(v)
-            res.append(news)
-        test = res
-        
-        with open(cachepath , 'wb') as f:
-            obj = pickle.dumps([train, val, test])
-            f.write(obj)
-        return train, val, test, config["feature_stastic"]
-    
-def parse_file(filename, args, config):
-    if 'movie' not in filename:
-        feature_names = list(config["feature_stastic"].keys())
-    else:
-        feature_names = [
-            'user_id', 'item_id', 'label', 'weekday', 'hour', 'age',
-            'gender', 'occupation', 'zip_code', 'movie_title',
-            'release_year', 'genre'
-        ]
+    def __iter__(self):
+        for chunk_path in self.chunk_paths:
+            yield torch.load(chunk_path, map_location="cpu", weights_only=True)
 
-    Data = []
-    reader = pd.read_csv(
-        filename,
-        header=None,
-        names=feature_names,
-        chunksize=args.batch_size,
-        low_memory=False,
-    )
-    for chunk in tqdm(reader):
+
+def _load_yaml_or_empty(path):
+    if not os.path.exists(path):
+        return {}
+    config = yaml.load(open(path, "r"), Loader=yaml.FullLoader)
+    return config if config is not None else {}
+
+
+def _infer_ctr_schema(train_csv):
+    sample = pd.read_csv(train_csv, nrows=2048, low_memory=False)
+    if "label" not in sample.columns:
+        raise ValueError(f"Missing label column in {train_csv}")
+    feature_names = [c for c in sample.columns if c != "label"]
+    feature_types = {}
+    for col in feature_names:
+        if pd.api.types.is_float_dtype(sample[col].dtype):
+            feature_types[col] = "numeric"
+        else:
+            feature_types[col] = "categorical"
+    return feature_names, feature_types
+
+
+def _build_ctr_split_cache(csv_path, split_cache_dir, batch_size, feature_names, feature_types):
+    os.makedirs(split_cache_dir, exist_ok=True)
+    categorical_max = {name: 0 for name, ftype in feature_types.items() if ftype == "categorical"}
+    chunk_paths = []
+
+    reader = pd.read_csv(csv_path, chunksize=batch_size, low_memory=False)
+    for idx, chunk in enumerate(tqdm(reader, desc=f"Caching {os.path.basename(csv_path)}", leave=False)):
         chunk = chunk.fillna(0)
-        record = {}
+        batch = {"label": torch.from_numpy(chunk["label"].to_numpy(dtype=np.float32))}
         for name in feature_names:
-            if name == "label":
-                continue
-            record[name] = chunk[name].to_numpy()
-        record["label"] = chunk["label"].to_numpy(dtype=np.float32)
-        Data.append(record)
-    return Data
+            if feature_types[name] == "numeric":
+                batch[name] = torch.from_numpy(chunk[name].to_numpy(dtype=np.float32))
+            else:
+                values = chunk[name].to_numpy(dtype=np.int64)
+                batch[name] = torch.from_numpy(values)
+                if values.size > 0:
+                    categorical_max[name] = max(categorical_max[name], int(values.max()))
+        chunk_path = os.path.join(split_cache_dir, f"chunk_{idx:06d}.pt")
+        torch.save(batch, chunk_path)
+        chunk_paths.append(chunk_path)
+
+    meta = {"num_chunks": len(chunk_paths), "categorical_max": categorical_max}
+    with open(os.path.join(split_cache_dir, "meta.yaml"), "w") as f:
+        yaml.safe_dump(meta, f, sort_keys=True)
+    return chunk_paths, categorical_max
+
+
+def _prepare_ctr_split_loader(dataset_dir, split, batch_size, feature_names, feature_types):
+    split_csv = os.path.join(dataset_dir, f"{split}.csv")
+    split_cache_dir = os.path.join(dataset_dir, "cache", f"bs{batch_size}", split)
+    meta_path = os.path.join(split_cache_dir, "meta.yaml")
+
+    if os.path.exists(meta_path):
+        meta = _load_yaml_or_empty(meta_path)
+        chunk_paths = []
+        for f_name in sorted(os.listdir(split_cache_dir)):
+            if f_name.startswith("chunk_") and f_name.endswith(".pt"):
+                chunk_paths.append(os.path.join(split_cache_dir, f_name))
+        if meta.get("num_chunks", -1) == len(chunk_paths) and len(chunk_paths) > 0:
+            return CTRChunkLoader(chunk_paths), meta.get("categorical_max", {})
+
+    if os.path.exists(split_cache_dir):
+        shutil.rmtree(split_cache_dir)
+    chunk_paths, categorical_max = _build_ctr_split_cache(
+        split_csv, split_cache_dir, batch_size, feature_names, feature_types
+    )
+    return CTRChunkLoader(chunk_paths), categorical_max
+
+
+def get_ctr_dataset(args):
+    dataset_dir = os.path.join(args.DATA_DIR, args.dataset)
+    config_path = os.path.join(dataset_dir, "config.yaml")
+    config = _load_yaml_or_empty(config_path)
+
+    train_csv = os.path.join(dataset_dir, "train.csv")
+    valid_csv = os.path.join(dataset_dir, "valid.csv")
+    test_csv = os.path.join(dataset_dir, "test.csv")
+    for p in [train_csv, valid_csv, test_csv]:
+        if not os.path.exists(p):
+            raise FileNotFoundError(f"Missing CTR file: {p}")
+
+    if "feature_names" in config and "feature_types" in config:
+        feature_names = config["feature_names"]
+        feature_types = config["feature_types"]
+    else:
+        feature_names, feature_types = _infer_ctr_schema(train_csv)
+        config["feature_names"] = feature_names
+        config["feature_types"] = feature_types
+
+    train_loader, train_max = _prepare_ctr_split_loader(dataset_dir, "train", args.batch_size, feature_names, feature_types)
+    valid_loader, valid_max = _prepare_ctr_split_loader(dataset_dir, "valid", args.batch_size, feature_names, feature_types)
+    test_loader, test_max = _prepare_ctr_split_loader(dataset_dir, "test", args.batch_size, feature_names, feature_types)
+
+    # Build feature_stastic from cache metadata, and keep config.yaml synced.
+    feature_stastic = config.get("feature_stastic", {"label": 2})
+    for name, ftype in feature_types.items():
+        if ftype == "categorical":
+            cache_max = max(train_max.get(name, 0), valid_max.get(name, 0), test_max.get(name, 0))
+            feature_stastic[name] = cache_max + 1
+        else:
+            feature_stastic[name] = 1
+    feature_stastic["label"] = 2
+    config["feature_names"] = feature_names
+    config["feature_types"] = feature_types
+    config["feature_stastic"] = feature_stastic
+    with open(config_path, "w") as f:
+        yaml.safe_dump(config, f, sort_keys=True)
+
+    return train_loader, valid_loader, test_loader, feature_stastic, feature_types

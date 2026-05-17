@@ -69,20 +69,32 @@ class BehaviorAggregator(nn.Module):
 
 # For CTR models
 class Embedding(nn.Module):
-    def __init__(self, embedding_dim, feature_stastic):
+    def __init__(self, embedding_dim, feature_stastic, numeric_features=None):
         super().__init__()
+        self.numeric_features = set(numeric_features or [])
         self.embedding: nn.ModuleDict[str:nn.Embedding] = nn.ModuleDict()
+        self.numeric_embedding = nn.ParameterDict()
+        self.feature_names = [name for name in feature_stastic.keys() if name != "label"]
         for feature, numb in feature_stastic.items():
-            if feature != 'label':
+            if feature == "label":
+                continue
+            if feature in self.numeric_features:
+                self.numeric_embedding[feature] = nn.Parameter(torch.empty(embedding_dim))
+                nn.init.normal_(self.numeric_embedding[feature], mean=0., std=0.01)
+            else:
                 self.embedding[feature] = nn.Embedding(numb + 1, embedding_dim)
         for _, value in self.embedding.items():
             nn.init.xavier_uniform_(value.weight)
 
     def forward(self, data):
         out = []
-        for name, raw in data.items():
-            if name != 'label':
-                    out.append(self.embedding[name](raw.long().cuda())[:, None, :])
+        for name in self.feature_names:
+            raw = data[name]
+            if name in self.numeric_features:
+                dense_emb = raw.float().cuda().unsqueeze(-1) * self.numeric_embedding[name].unsqueeze(0)
+                out.append(dense_emb[:, None, :])
+            else:
+                out.append(self.embedding[name](raw.long().cuda())[:, None, :])
         return torch.cat(out, dim=-2)
 
 
@@ -118,11 +130,18 @@ class MLP(nn.Module):
     
 
 class LR(nn.Module):
-    def __init__(self, feature_stastic):
+    def __init__(self, feature_stastic, numeric_features=None):
         super(LR,self).__init__()
+        self.numeric_features = set(numeric_features or [])
+        self.feature_names = [name for name in feature_stastic.keys() if name != "label"]
         self.embedding: nn.ModuleDict[str:nn.Embedding] = nn.ModuleDict()
+        self.numeric_weight = nn.ParameterDict()
         for feature, numb in feature_stastic.items():
-            if feature != 'label':
+            if feature == "label":
+                continue
+            if feature in self.numeric_features:
+                self.numeric_weight[feature] = nn.Parameter(torch.zeros(1))
+            else:
                 self.embedding[feature] = torch.nn.Embedding(numb + 1, 1)
         
         for _, value in self.embedding.items():
@@ -130,8 +149,11 @@ class LR(nn.Module):
     
     def forward(self, data):
         out = []
-        for name, raw in data.items():
-            if name != 'label':
+        for name in self.feature_names:
+            raw = data[name]
+            if name in self.numeric_features:
+                out.append((raw.float().cuda() * self.numeric_weight[name]).unsqueeze(1).unsqueeze(-1))
+            else:
                 out.append(self.embedding[name](raw.long().cuda())[:, None, :])
         out = torch.cat(out, dim=-2)
         return torch.sum(out, dim=1)

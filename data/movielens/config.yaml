@@ -1,0 +1,13 @@
+feature_names:
+- user_id
+- item_id
+- tag_id
+feature_stastic:
+  item_id: 90439
+  label: 2
+  tag_id: 69149
+  user_id: 90445
+feature_types:
+  item_id: categorical
+  tag_id: categorical
+  user_id: categorical

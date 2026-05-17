@@ -13,7 +13,7 @@ class FM(BaseCTR):
     def __init__(self, args, feature_stastic):
         super().__init__(args, feature_stastic)
         self.model_name = "fm"
-        self.one_order = LR(feature_stastic)
+        self.one_order = LR(feature_stastic, self.numeric_features)
     
     def FeatureInteraction(self, dense_input, sparse_input):
         fm = torch.sum(dense_input, dim=1) ** 2 - torch.sum(dense_input ** 2 , dim=1)
@@ -27,7 +27,7 @@ class DeepFM(BaseCTR):
         self.model_name = "deepfm"
         self.hidden_dims = args.hidden_dims
         self.dropout = args.dropout
-        self.one_order = LR(feature_stastic)
+        self.one_order = LR(feature_stastic, self.numeric_features)
         self.mlp = MLP(self.embedding_dim, feature_stastic, self.hidden_dims, self.dropout)
     
     def FeatureInteraction(self, dense_input, sparse_input):
@@ -276,7 +276,7 @@ class XDeepFM(BaseCTR):
         self.dropout = args.dropout
         self.cin_dims = args.cin_dims
         self.mlp = MLP(self.embedding_dim, feature_stastic, self.hidden_dims, self.dropout)
-        self.one_order = LR(feature_stastic)
+        self.one_order = LR(feature_stastic, self.numeric_features)
         self.cinlist = [len(feature_stastic) - 1] + self.cin_dims
         self.cin = nn.ModuleList([CINComp(self.cinlist[i], self.cinlist[i + 1], feature_stastic) for i in range(0, len(self.cinlist) - 1)])
         self.linear = nn.Linear(sum(self.cinlist) - self.cinlist[0], 1)

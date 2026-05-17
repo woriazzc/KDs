@@ -1,13 +1,121 @@
-feature_stastic:  {'label': 2, 'I1': 62, 'I2': 113, 'I3': 125, 'I4': 50, 'I5': 223,
-                      'I6': 147, 'I7': 99, 'I8': 78, 'I9': 103, 'I10': 8,
-                      'I11': 31, 'I12': 56, 'I13': 81, 'C1': 1457, 'C2': 555,
-                      'C3': 245195, 'C4': 166164, 'C5': 305, 'C6': 18,
-                      'C7': 12054, 'C8': 633, 'C9': 3, 'C10': 46329, 'C11': 5228,
-                      'C12': 243452, 'C13': 3176, 'C14': 26, 'C15': 11744,
-                      'C16': 225320, 'C17': 10, 'C18': 4726, 'C19': 2056, 'C20': 3,
-                      'C21': 238638, 'C22': 16, 'C23': 15, 'C24': 67854, 'C25': 87,
-                      'C26': 50940}
-
-feature_defaults: [[0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0],
-                                 [0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0], [0],
-                                 [0], [0], [0], [0], [0], [0]]
+feature_names:
+- I1
+- I2
+- I3
+- I4
+- I5
+- I6
+- I7
+- I8
+- I9
+- I10
+- I11
+- I12
+- I13
+- C1
+- C2
+- C3
+- C4
+- C5
+- C6
+- C7
+- C8
+- C9
+- C10
+- C11
+- C12
+- C13
+- C14
+- C15
+- C16
+- C17
+- C18
+- C19
+- C20
+- C21
+- C22
+- C23
+- C24
+- C25
+- C26
+feature_stastic:
+  C1: 1474
+  C10: 732084
+  C11: 737432
+  C12: 1147331
+  C13: 1150511
+  C14: 1150538
+  C15: 1163036
+  C16: 1528981
+  C17: 1528992
+  C18: 1533924
+  C19: 1536018
+  C2: 2032
+  C20: 1536022
+  C21: 1934144
+  C22: 1934162
+  C23: 1934178
+  C24: 2022801
+  C25: 2022897
+  C26: 2086975
+  C3: 415606
+  C4: 664215
+  C5: 664521
+  C6: 664542
+  C7: 676732
+  C8: 677366
+  C9: 677370
+  I1: 1
+  I10: 1
+  I11: 1
+  I12: 1
+  I13: 1
+  I2: 1
+  I3: 1
+  I4: 1
+  I5: 1
+  I6: 1
+  I7: 1
+  I8: 1
+  I9: 1
+  label: 2
+feature_types:
+  C1: categorical
+  C10: categorical
+  C11: categorical
+  C12: categorical
+  C13: categorical
+  C14: categorical
+  C15: categorical
+  C16: categorical
+  C17: categorical
+  C18: categorical
+  C19: categorical
+  C2: categorical
+  C20: categorical
+  C21: categorical
+  C22: categorical
+  C23: categorical
+  C24: categorical
+  C25: categorical
+  C26: categorical
+  C3: categorical
+  C4: categorical
+  C5: categorical
+  C6: categorical
+  C7: categorical
+  C8: categorical
+  C9: categorical
+  I1: numeric
+  I10: numeric
+  I11: numeric
+  I12: numeric
+  I13: numeric
+  I2: numeric
+  I3: numeric
+  I4: numeric
+  I5: numeric
+  I6: numeric
+  I7: numeric
+  I8: numeric
+  I9: numeric

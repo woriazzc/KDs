@@ -1,6 +1,6 @@
 crossnet:
   epochs: 1000
-  batch_size: 10000
+  batch_size: 4096
   lr: 1.e-3
   lmbda: 0.1
 

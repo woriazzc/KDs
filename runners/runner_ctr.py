@@ -15,7 +15,8 @@ import modeling.KD.ctr as KD
 
 def main(args, teacher_args, student_args, logger):
     # Dataset
-    train_loader, valid_loader, test_loader, feature_stastic = get_ctr_dataset(args)
+    train_loader, valid_loader, test_loader, feature_stastic, feature_types = get_ctr_dataset(args)
+    numeric_features = [name for name, ftype in feature_types.items() if ftype == "numeric"]
 
     # Backbone
     all_backbones = [e.lower() for e in dir(backbone)]
@@ -23,6 +24,8 @@ def main(args, teacher_args, student_args, logger):
         all_teacher_args, all_student_args = deepcopy(args), deepcopy(args)
         all_teacher_args.__dict__.update(teacher_args.__dict__)
         all_student_args.__dict__.update(student_args.__dict__)
+        all_teacher_args.numeric_features = numeric_features
+        all_student_args.numeric_features = numeric_features
         Teacher = getattr(backbone, dir(backbone)[all_backbones.index(args.T_backbone.lower())])(all_teacher_args, feature_stastic).cuda()
         if not args.train_teacher:
             Student = getattr(backbone, dir(backbone)[all_backbones.index(args.S_backbone.lower())])(all_student_args, feature_stastic).cuda()
