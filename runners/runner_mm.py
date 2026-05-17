@@ -4,10 +4,10 @@ from copy import deepcopy
 
 import torch
 import torch.optim as optim
-from torch.utils.data import DataLoader
 
 from modules.dataset import load_cf_data, load_multimodal, implicit_CF_dataset, implicit_CF_dataset_test, split_implicit_CF_dataset
 from modules.evaluation import Evaluator
+from utils import maybe_parallelize, build_train_loader, set_sampler_epoch
 from modeling import backbone
 from modeling.KD.general import Scratch
 import modeling.KD.mm as KD
@@ -24,9 +24,9 @@ def main(args, teacher_args, student_args, logger):
 
     if args.model.lower() == "auxmm":
         trainset_main = split_implicit_CF_dataset(trainset, args.main_ratio)
-        train_loader = DataLoader(trainset_main, batch_size=args.batch_size, shuffle=True)
+        train_loader, train_sampler = build_train_loader(trainset_main, args.batch_size, True, args)
     else:
-        train_loader = DataLoader(trainset, batch_size=args.batch_size, shuffle=True)
+        train_loader, train_sampler = build_train_loader(trainset, args.batch_size, True, args)
 
     # Backbone
     all_backbones = [e.lower() for e in dir(backbone)]
@@ -69,6 +69,7 @@ def main(args, teacher_args, student_args, logger):
             raise(NotImplementedError, f'Invalid model {args.model}.')
 
     # Optimizer
+    model = maybe_parallelize(model, args)
     optimizer = optim.Adam(model.get_params_to_update())
 
     # Evaluator
@@ -85,6 +86,7 @@ def main(args, teacher_args, student_args, logger):
         logger.log('-' * 40 + "Teacher" + '-' * 40, pre=False)
         tmp_evaluator = Evaluator(args)
         tmp_model = Scratch(args, Teacher).cuda()
+        tmp_model = maybe_parallelize(tmp_model, args)
         is_improved, early_stop, eval_results, elapsed = tmp_evaluator.evaluate_while_training(tmp_model, -1, train_loader, validset, testset)
         Evaluator.print_final_result(logger, tmp_evaluator.eval_dict)
         logger.log('-' * 88, pre=False)
@@ -92,6 +94,7 @@ def main(args, teacher_args, student_args, logger):
     for epoch in range(args.epochs):
         logger.log(f'Epoch [{epoch + 1}/{args.epochs}]')
         tic1 = time.time()
+        set_sampler_epoch(train_sampler, epoch)
         logger.log('Negative sampling...')
         if hasattr(train_loader.dataset, "negative_sampling"):
             train_loader.dataset.negative_sampling()

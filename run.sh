@@ -174,3 +174,8 @@ python -u main.py --task=ctr --dataset=criteo --S_backbone=cin --T_backbone=cin 
 
 python -u main.py --task=ctr --dataset=criteo --S_backbone=gatecrossnet --T_backbone=gatecrossnet --model=fitnet
 python -u main.py --task=ctr --dataset=criteo --S_backbone=gatecrossnet --T_backbone=gatecrossnet --model=bced
+
+# DDP templates (single machine, multi-GPU)
+# Set visible GPUs with CUDA_VISIBLE_DEVICES, launch one process per GPU.
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 main.py --task=ctr --dataset=criteo --S_backbone=crossnet --train_teacher --suffix teacher
+CUDA_VISIBLE_DEVICES=0,1 torchrun --nproc_per_node=2 main.py --task=ctr --dataset=criteo --S_backbone=crossnet --T_backbone=crossnet --model=fitnet

@@ -8,6 +8,7 @@ import torch.optim as optim
 
 from modules.dataset import get_ctr_dataset
 from modules.evaluation import Evaluator
+from utils import maybe_parallelize, shard_ctr_train_loader
 from modeling import backbone
 from modeling.KD.general import Scratch
 import modeling.KD.ctr as KD
@@ -16,6 +17,7 @@ import modeling.KD.ctr as KD
 def main(args, teacher_args, student_args, logger):
     # Dataset
     train_loader, valid_loader, test_loader, feature_stastic, feature_types = get_ctr_dataset(args)
+    train_loader = shard_ctr_train_loader(train_loader, args)
     numeric_features = [name for name, ftype in feature_types.items() if ftype == "numeric"]
 
     # Backbone
@@ -50,6 +52,7 @@ def main(args, teacher_args, student_args, logger):
             raise(NotImplementedError, f'Invalid model {args.model}.')
 
     # Optimizer
+    model = maybe_parallelize(model, args)
     optimizer = optim.Adam(model.get_params_to_update())
 
     # Evaluator
@@ -62,6 +65,7 @@ def main(args, teacher_args, student_args, logger):
         logger.log('-' * 40 + "Teacher" + '-' * 40, pre=False)
         tmp_evaluator = Evaluator(args)
         tmp_model = Scratch(args, Teacher).cuda()
+        tmp_model = maybe_parallelize(tmp_model, args)
 
         is_improved, early_stop, eval_results, elapsed = tmp_evaluator.evaluate_while_training(tmp_model, -1, train_loader, valid_loader, test_loader)
         Evaluator.print_final_result(logger, tmp_evaluator.eval_dict)
@@ -77,7 +81,10 @@ def main(args, teacher_args, student_args, logger):
         epoch_loss, epoch_base_loss, epoch_kd_loss = [], [], []
         logger.log('Training...')
 
-        iterator = train_loader if args.no_log else tqdm(train_loader)
+        if getattr(args, "ddp", False):
+            iterator = tqdm(train_loader, position=getattr(args, "rank", 0), leave=True)
+        else:
+            iterator = train_loader if args.no_log else tqdm(train_loader)
         for idx, data in enumerate(iterator):
             label = data["label"].cuda()
             

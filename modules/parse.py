@@ -48,7 +48,7 @@ parser.add_argument('--eval_period', type=int, default=1)
 parser.add_argument('--K_list', type=list, default=[10, 20])
 parser.add_argument('--early_stop_metric', type=str, default='NDCG')
 parser.add_argument('--early_stop_K', type=int, default=10)
-parser.add_argument('--early_stop_patience', type=int, default=30)
+parser.add_argument('--early_stop_patience', type=int, default=5)
 
 parser.add_argument(
         '--cfg',
